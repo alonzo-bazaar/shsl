@@ -1,6 +1,6 @@
 # compilation output
-shsl
-a.out
+./shsl
+./a.out
 
 # not using it rn
-stb_ds.h
+./stb_ds.h
