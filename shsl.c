@@ -4,80 +4,150 @@
 
 #include<ctype.h>
 #include<string.h>
+#include<assert.h>
 
-/* this is a temporary scratch-ish version of the final code
- * final code will have to be written with an eye of regard
- * towards garbage collection and shit
+/* this is a first version of the code where the automatic memory management
+ * is done through (some rather naive) reference cocunting
+ * 
+ * this first version is meant to have a first non leaking version of the
+ * interpreter with some support for automatic memory management
+ * 
+ * once it's developed further we plan to replace the hardcoded refcounting with
+ * a more generic gc interface offering greater flexibility in ways to manage
+ * memory
+ * because generational collectors look cool as fuck
  */
 
-// structs definition
-
+// definitions of shsl values 
 typedef enum {
 	// atoms
+	// nil first so an object initialized as {0} is nil
+	SHSL_OBJ_NIL = 0, SHSL_OBJ_SYMBOL, 
 	SHSL_OBJ_INTEGER, SHSL_OBJ_REAL, SHSL_OBJ_STRING,
-	SHSL_OBJ_SYMBOL, SHSL_OBJ_NIL,
 
-	// cons
-	SHSL_OBJ_CONS,
+	// composite
+	SHSL_OBJ_CONS, SHSL_OBJ_MAP, SHSL_OBJ_VECTOR,
 } SHSL_OBJECT_TYPE;
 
-struct shsl_cons;
-struct shsl_sym;
+struct shsl_obj;
 
-typedef struct {
+typedef struct shsl_cons {
+	struct shsl_obj* car;
+	struct shsl_obj* cdr;
+} shsl_cons ;
+
+typedef struct shsl_sym {
+	const char* name;
+} shsl_sym ;
+
+typedef struct shsl_obj {
+	// header
+	int ref_count;
 	SHSL_OBJECT_TYPE type;
+
+	// data
 	union {
-		long i; double r;
+		// void* nil; // I just need something to mark nil
+		long i;
+		double r;
 		const char* str;
-		struct shsl_sym* sym;
-		void* nil; // I just need something to mark nil
-		struct shsl_cons* cons;
+		struct shsl_cons cons;
+		struct shsl_sym sym;
 	};
 } shsl_obj;	
 
-struct shsl_cons { shsl_obj* car; shsl_obj* cdr; };
-typedef struct shsl_cons shsl_cons;
 
-struct shsl_sym { const char* name; };
-typedef struct shsl_sym shsl_sym;
+const shsl_obj SHSL_NIL = {0};
+// shsl_obj shsl_obj_mknil()
+// { return (shsl_obj){ .ref_count = 0, .type = SHSL_OBJ_NIL, .nil = 0, }; }
 
-shsl_obj shsl_obj_mkint(long l)
-{ return (shsl_obj){ .type = SHSL_OBJ_INTEGER, .i = l, }; }
-shsl_obj shsl_obj_mkreal(double d)
-{ return (shsl_obj){ .type = SHSL_OBJ_REAL, .r = d, }; }
-shsl_obj shsl_obj_mkstr(const char* str)
-{ return (shsl_obj){ .type = SHSL_OBJ_STRING, .str = str, }; }
-shsl_obj shsl_obj_mknil()
-{ return (shsl_obj){ .type = SHSL_OBJ_NIL, .nil = 0, }; }
-shsl_obj shsl_obj_mksym(shsl_sym* sym)
-{ return (shsl_obj){ .type = SHSL_OBJ_SYMBOL, .sym = sym, }; }
-shsl_obj shsl_obj_mkcons(shsl_cons* cons)
-{ return (shsl_obj){ .type = SHSL_OBJ_CONS, .cons = cons, }; }
-
-shsl_cons* shsl_mkcons(shsl_obj* car, shsl_obj* cdr) {
-	shsl_cons* cons = (shsl_cons*)malloc(sizeof(shsl_cons));
-	cons->car = car;
-	cons->cdr = cdr;
-	return cons;
+void shsl_free_obj(shsl_obj *obj) {
+	switch(obj->type) {
+	case SHSL_OBJ_NIL:
+		fprintf(stderr, "cannot free NIL! You fucked something up!\n");
+		break;
+	case SHSL_OBJ_CONS:
+		if(obj->cons.car->type != SHSL_OBJ_NIL)
+			shsl_free_obj(obj->cons.car);
+		if(obj->cons.cdr->type != SHSL_OBJ_NIL)
+			shsl_free_obj(obj->cons.cdr);
+		free(obj);
+	default:
+		free(obj);
+	}
 }
 
-shsl_sym* shsl_mksym(const char* name) {
-	shsl_sym* sym = (shsl_sym*)malloc(sizeof(shsl_sym));
-	sym->name = name;
-	return sym;
+void shsl_add_ref(shsl_obj* obj) {
+	if(obj->type != SHSL_OBJ_NIL)
+		obj->ref_count++;
+}
+void shsl_del_ref(shsl_obj* obj) {
+	if(obj->type != SHSL_OBJ_NIL) {
+		obj->ref_count--;
+		if(obj->ref_count == 0)
+			shsl_free_obj(obj);
+	}
 }
 
-const shsl_obj SHSL_NIL = (shsl_obj) {
-	.type = SHSL_OBJ_NIL,
-	.nil = 0,
-};
+// the shsl_obj_mk* functions all return references to fresh objects
+// although those objects may contain references to pre-existing objects
+shsl_obj* shsl_obj_mkint(long l) {
+	shsl_obj* obj_p = (shsl_obj*)malloc(sizeof(shsl_obj));
+	*obj_p = (shsl_obj)
+		{ .ref_count = 0, .type = SHSL_OBJ_INTEGER, .i = l, };
+	return obj_p;
+}
+shsl_obj* shsl_obj_mkreal(double d) {
+	shsl_obj* obj_p = (shsl_obj*)malloc(sizeof(shsl_obj));
+	*obj_p = (shsl_obj)
+		{ .ref_count = 0, .type = SHSL_OBJ_REAL, .r = d, };
+	return obj_p;
+}
+shsl_obj* shsl_obj_mkstr(const char* str) {
+	shsl_obj* obj_p = (shsl_obj*)malloc(sizeof(shsl_obj));
+	*obj_p = (shsl_obj)
+		{ .ref_count = 0, .type = SHSL_OBJ_STRING, .str = str, };
+	return obj_p;
+}
+shsl_obj* shsl_obj_mksym(const char* name) {
+	shsl_obj* sym_obj = (shsl_obj*)malloc(sizeof(shsl_obj));
+	*sym_obj = (shsl_obj) {
+		.ref_count = 0,
+		.type = SHSL_OBJ_SYMBOL,
+		.sym = (shsl_sym) { .name = name }
+	};
+	return sym_obj;
+}
+shsl_obj* shsl_obj_mkcons(shsl_obj* car, shsl_obj* cdr) {
+	shsl_obj* cons_obj = (shsl_obj*)(malloc)(sizeof(shsl_obj));
+	*cons_obj = (shsl_obj) {
+		.ref_count = 0,
+		.type = SHSL_OBJ_CONS,
+		.cons = (shsl_cons) { .car = car, .cdr = cdr, }
+	};
+	shsl_add_ref(car);
+	shsl_add_ref(cdr);
+	return cons_obj;
+}
 
-// parse (leaks like a motherfucker)
+void shsl_cons_set_cdr(shsl_obj* cons_obj, shsl_obj* cdr) {
+	assert(cons_obj->type == SHSL_OBJ_CONS);
+	shsl_add_ref(cdr);
+	shsl_del_ref(cons_obj->cons.cdr);
+	cons_obj->cons.cdr = cdr;
+}
+void shsl_cons_set_car(shsl_obj* cons_obj, shsl_obj* car) {
+	assert(cons_obj->type == SHSL_OBJ_CONS);
+	shsl_add_ref(car);
+	shsl_del_ref(cons_obj->cons.car);
+	cons_obj->cons.car = car;
+}
+
 // lexer
-
 typedef enum {
 	// literals
-	SHSL_TOK_INTEGER, SHSL_TOK_REAL, SHSL_TOK_STRING, SHSL_TOK_SYMBOL,
+	SHSL_TOK_NIL = 0, SHSL_TOK_SYMBOL,
+	SHSL_TOK_INTEGER, SHSL_TOK_REAL, SHSL_TOK_STRING,
 
 	// (quasi)quoting
 	SHSL_TOK_QUOTE, SHSL_TOK_QUASIQUOTE, SHSL_TOK_COMMA,
@@ -87,15 +157,21 @@ typedef enum {
 	SHSL_TOK_OPEN_SQUARE, SHSL_TOK_CLOSE_SQUARE,
 	SHSL_TOK_OPEN_CURLY, SHSL_TOK_CLOSE_CURLY,
 
+	// we then have special token types to express
 	// eof
 	SHSL_TOK_EOF,
-
 	// error
 	SHSL_TOK_ERROR,
 } SHSL_TOKEN_TYPE;
 
-typedef struct { SHSL_TOKEN_TYPE type; shsl_obj obj; } shsl_token;
-typedef struct { shsl_token token; char* remaining; } lexer_pair;
+typedef struct {
+	SHSL_TOKEN_TYPE type;
+	const shsl_obj* obj;
+} shsl_token;
+typedef struct {
+	shsl_token token;
+	char* remaining;
+} lexer_pair;
 
 // we're gonna return a lot of tokens where we only care about the type
 // and the underlying object is of little use
@@ -103,7 +179,7 @@ typedef struct { shsl_token token; char* remaining; } lexer_pair;
 shsl_token empty_token(SHSL_TOKEN_TYPE token_type) {
 	return (shsl_token) {
 		.type = token_type,
-		.obj = SHSL_NIL,
+		.obj = &SHSL_NIL,
 	};
 }
 
@@ -166,6 +242,7 @@ const char* slice_to_fresh_str(const char* c, size_t len) {
 // non special tokens are either symbols or numbers
 // (we only support integers rn)
 // try parsing (c - c+len) as a number, if it fails return it as a symobol
+// a symbol named nil will not return a symbol but a special nil token
 shsl_token parse_non_special_token(char*c, size_t len) {
 	long l;
 	if (try_parse_integer(c, len, &l))
@@ -173,19 +250,27 @@ shsl_token parse_non_special_token(char*c, size_t len) {
 			.type = SHSL_TOK_INTEGER,
 			.obj = shsl_obj_mkint(l),
 		};
-	else
+
+	if (len == 3 && c[0] == 'n' && c[1] == 'i' && c[2] == 'l')
 		return (shsl_token) {
-			.type = SHSL_TOK_SYMBOL,
-			.obj = shsl_obj_mksym(shsl_mksym(slice_to_fresh_str(c, len))),
+			.type = SHSL_TOK_NIL,
+			.obj = &SHSL_NIL,
 		};
+	
+	return (shsl_token) {
+		.type = SHSL_TOK_SYMBOL,
+		.obj = shsl_obj_mksym(slice_to_fresh_str(c, len)),
+	};
 }
 
 lexer_pair token_off(char* str) {
 	// handle null pointer string
-	if(!str) return error_lexer_pair("cannot read null pointer to string!");
+	if(!str)
+		return error_lexer_pair("cannot read null pointer to string!");
 
-	// handle empty string
-	if(!*str) return (lexer_pair) {
+	// handle empty string (we reached the null terminator)
+	if(*str == '\0')
+		return (lexer_pair) {
 			.token = empty_token(SHSL_TOK_EOF),
 			.remaining = nullptr,
 		};
@@ -226,7 +311,8 @@ lexer_pair token_off(char* str) {
 		return (lexer_pair){ .token = empty_token(SHSL_TOK_COMMA),
 							 .remaining = str+1, };
 
-	// string literal
+	// string literals
+	// TODO: we currently don't handle escape sequences
 	case '"': {
 		char* c = str+1;
 		while (*c!='\0' && *c!='"') c++;
@@ -264,18 +350,21 @@ lexer_pair token_off(char* str) {
 
 // parser (also leaks like a motherfucker)
 // the parser returns shsl objects, there is no separate expression type
-typedef struct { shsl_obj obj; char* remaining; } parser_pair;
+typedef struct {
+	shsl_obj* obj;
+	char* remaining;
+} parser_pair;
 parser_pair parse_off(char* str) {
-	// TODO
+	assert(false);
 }
-
 parser_pair parse_until(char* str,
 						SHSL_TOKEN_TYPE stop,
 						SHSL_TOKEN_TYPE* error_on, size_t error_on_len) {
-	// TODO
+	assert(false);
 }
 
 // evaluator (also also leaks like a motherfucker)
+//
 
 // print debugging
 void shsl_dbg_fputobj(const shsl_obj* obj, FILE* restrict stream) {
@@ -290,16 +379,16 @@ void shsl_dbg_fputobj(const shsl_obj* obj, FILE* restrict stream) {
 		fprintf(stream, "%s_s", obj->str);
 		break;
 	case SHSL_OBJ_SYMBOL:
-		fprintf(stream, "%s_sym", obj->sym->name);
+		fprintf(stream, "%s_sym", obj->sym.name);
 		break;
 	case SHSL_OBJ_NIL:
 		fprintf(stream, "%s", "nil");
 		break;
 	case SHSL_OBJ_CONS:
 		fputc('(', stream);
-		shsl_dbg_fputobj(obj->cons->car, stream);
+		shsl_dbg_fputobj(obj->cons.car, stream);
 		fputc(' ', stream); fputc('.', stream); fputc(' ', stream); 
-		shsl_dbg_fputobj(obj->cons->cdr, stream);
+		shsl_dbg_fputobj(obj->cons.cdr, stream);
 		fputc(')', stream);
 	};
 }
@@ -352,7 +441,7 @@ void shsl_dbg_fputtok(const shsl_token* tok, FILE* restrict stream) {
 	case SHSL_TOK_ERROR:
 		fputs("SHSL_TOK_ERROR: ", stream);
 	};
-	shsl_dbg_fputobj(&tok->obj, stream);
+	shsl_dbg_fputobj(tok->obj, stream);
 }
 
 int main(int argc, char** argv) {
