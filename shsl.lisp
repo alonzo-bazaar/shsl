@@ -96,7 +96,7 @@
           ((member s '("+" "-") :test #'string=)
            nil)
           ((char= (char s 0) #\+)
-           ((rec 1 0)))
+           (rec 1 0))
           ((char= (char s 0) #\-)
            (let ((a (rec 1 0))) (and a (- a))))
 
@@ -147,15 +147,17 @@
 	  ((eq l '\{) (parse-until rst :stop '\} :error-on '(\) \])))
 
 	  ;; quote, quasiquote, comma
+	  ;; we use '|quote| instead of 'quote for consistency with how other
+	  ;; alphanumeric symbols in the parsed result look
       ((eq l '\')
        (multiple-value-bind (quoted rst) (parse-off rst)
-         (values (list 'quote quoted) rst)))
+         (values (list '|quote| quoted) rst)))
       ((eq l '\`)
        (multiple-value-bind (quoted rst) (parse-off rst)
-         (values (list 'quasiquote quoted) rst)))
+         (values (list '|quasiquote| quoted) rst)))
       ((eq l '\,)
        (multiple-value-bind (quoted rst) (parse-off rst)
-         (values (list 'comma quoted) rst)))
+         (values (list '|comma| quoted) rst)))
 
 	  ;; atoms (other special shit, or literals)
 	  ((or (numberp l)
@@ -201,30 +203,168 @@
            (and (equal form '(+ 1 2)) (equal rst "")))
 
          (multiple-value-bind (form rst) (parse-off "'(+ 1 2)")
-           (and (equal form '(quote (+ 1 2))) (equal rst "")))
+           (and (equal form '(|quote| (+ 1 2))) (equal rst "")))
 
          (multiple-value-bind (form rst) (parse-off "`(+ 1 2)")
-           (and (equal form '(quasiquote (+ 1 2))) (equal rst "")))
+           (and (equal form '(|quasiquote| (+ 1 2))) (equal rst "")))
 
          (multiple-value-bind (form rst) (parse-off ",(+ 1 2)")
-           (and (equal form '(comma (+ 1 2))) (equal rst "")))
+           (and (equal form '(|comma| (+ 1 2))) (equal rst "")))
          ))
 
-;; evaluator
-;; as of now, brutale brutale, the sicp tree walk
+(defclass shsl-frame ()
+  ((bindings
+	:type hash-table
+	:initarg :bindings
+	:accessor shsl-frame-bindings
+	:initform (make-hash-table))))
 
-;; I want the following lispy shit
-;; if let do lambda defvar defun defmacro set setq progn
-;; TODO: lambda lists?
+(defclass shsl-env ()
+  ((first
+	:type shsl-frame
+	:initarg :first
+	:accessor shsl-env-first
+	:initform (make-instance 'shsl-frame))
+   (parent
+	:type (or shsl-env null)
+	:initarg :parent
+	:accessor shsl-env-parent
+	:initform nil)))
 
-;; and the following scripty shit
-;; while until
+(defmethod lookup ((name symbol) (frame shsl-frame))
+	(gethash name (shsl-frame-bindings frame)))
 
-;; plus the following builtin funs
-;; + - * /
-;; and builtin macros
-;; and or (short circuiting: ergo macro)
+(defmethod lookup ((name symbol) (env shsl-env))
+  (multiple-value-bind (val found) (lookup name (shsl-env-first env))
+	(cond (found (values val t))
+		  ((shsl-env-parent env) (lookup name (shsl-env-parent env)))
+		  (t (values nil nil)))))
 
+(defparameter *empty-env* (make-instance 'shsl-env))
+
+(defclass shsl-fun ()
+  ((env
+	:type shsl-env
+	:accessor shsl-fun-env
+	:initarg :env)))
+(defclass shsl-macro (shsl-fun) ())
+
+(defclass shsl-builtin-fun (shsl-fun)
+  ((env
+	:initform *empty-env*)
+   (inner
+	:type (function (list) t)
+	:accessor shsl-builtin-fun-inner
+	:initarg :inner)))
+
+(defclass shsl-builtin-macro (shsl-builtin-fun shsl-macro)
+  ((inner
+	:type (function (list) t)
+	:accessor shsl-builtin-macro-inner
+	:initarg :inner)))
+
+(defparameter *initial-env-frame*
+  (let ((tb (make-hash-table)))
+	(macrolet ((builtin-fun-that (&body body)
+				 `(make-instance 'shsl-builtin-fun
+								 :inner (lambda (args) ,@body)))
+			   (builtin-macro-that (&body body)
+				 `(make-instance 'shsl-builtin-macro
+								 :inner (lambda (args) ,@body))))
+
+	  ;; no sanitization atm
+	  (setf (gethash '|+| tb) (builtin-fun-that
+							   (reduce #'+ args :initial-value 0)))
+	  (setf (gethash '|-| tb) (builtin-fun-that
+							   (- (car args)
+								  (reduce #'+ (cdr args) :initial-value 0))))
+	  (setf (gethash '|car| tb) (builtin-fun-that
+								 (caar args)))
+	  (setf (gethash '|cdr| tb) (builtin-fun-that
+								 (cdar args)))
+
+	  ;; no sanitization atm
+
+	  (make-instance 'shsl-frame :bindings tb))))
+
+(defparameter *initial-env* (make-instance 'shsl-env
+										   :first *initial-env-frame*
+										   :parent nil))
+
+(defmethod shsl-apply ((fn shsl-builtin-fun) (args list))
+  (funcall (shsl-builtin-fun-inner fn) args))
+
+(defmethod shsl-macroexpand-1 ((mc shsl-builtin-macro) (args list))
+  (funcall (shsl-builtin-macro-inner mc) args))
+
+(defun shsl-fun-p (f) (typep f 'shsl-fun))
+(defun shsl-macro-p (f) (typep f 'shsl-macro))
+
+;; (defmethod shsl-macroexpand ((mc shsl-builtin-macro) (args list))
+;;   (let ((me1 (shsl-macroexpand-1 args)))
+;; 	(
+
+(defun shsl-eval (expr env)
+  (if (not (consp expr))
+	  ;; eval atom
+	  (cond
+		((or (integerp expr) (stringp expr) (null expr))     ; self evaluating
+		 expr) 
+		((symbolp expr)                                      ; symbol lookup
+		 (multiple-value-bind (val found) (lookup expr env)
+		   (if found
+			   val
+			   (error "cannot find value of unbound symbol ~A~%" expr))))
+		(t (error "unrecognized atomic expression ~A~%" expr)))
+
+	  ;; eval compound
+	  (cond
+		;; special forms (quote if let lambda while begin et al.)
+		((eq (car expr) '|quote|)
+		 (unless (= (length expr) 2)
+		   (error "malformed quote expression ~A, incorrect length ~A !"
+				  expr (length expr)))
+		 (cadr expr))
+
+		((eq (car expr) '|if|)
+		 (unless (or (= (length expr) 3) (= (length expr) 4))
+		   (error "malformed if expression ~A, incorrect length ~A !"
+				  expr (length expr)))
+		 (if (shsl-eval (cadr expr) env)
+			 (shsl-eval (caddr expr) env)
+			 (shsl-eval (cadddr expr) env)))
+
+		;; macros and procedures
+		;; which can be either user defined or builtin
+		(t
+		 (let ((operator (shsl-eval (car expr) env))
+			   (operands (cdr expr)))
+		   (cond ((shsl-fun-p operator)
+				  (shsl-apply
+				   operator
+				   (mapcar (lambda (x) (shsl-eval x env)) operands)))
+				 ((shsl-macro-p operator)
+				  (shsl-eval
+				   (shsl-macroexpand-1 operator operands)
+				   env))
+				 (t (error "unrecognized operator ~A of expression ~A~%operator is neither a function or a macro~%" operator expr))))))))
+
+(defmacro with-shsl-eval-str ((valsym str) &body body)
+  `(multiple-value-bind (,valsym _) (parse-off ,str)
+	 (declare (ignore _))
+	 (let ((,valsym (shsl-eval ,valsym *initial-env*)))
+	   ,@body)))
+
+(assert (and
+		 (with-shsl-eval-str (val "'a")
+		   (equal val '|a|))
+		 (with-shsl-eval-str (val "(+ 1 2)")
+		   (equal val 3))
+		 ))
+
+
+#|
+;; for later, I think it'd be a good idea to have a clos adjacent thing
 (defclass if-expr (expr)
   ((clause :type expr :accessor :clause :initarg :clause)
    (then-part :type expr :accessor :then-part :initarg :then-part)
@@ -234,3 +374,4 @@
   ((clause :type expr :accessor :clause :initarg :clause)
    (then-part :type expr :accessor :then-part :initarg :then-part)
    (else-part :type expr :accessor :else-part :initarg :else-part)))
+|#

@@ -1,6 +1,7 @@
 This file contains ramblings and design ideas for shsl
 
-* types
+* lang
+** types
 There are the following types
 - integer (long)
 - real (double)
@@ -16,6 +17,24 @@ and then have a cons value that's a tagged pointer to a cons struct?
 
 I think that might make sense,
 it's gonna be a pain in the ass to wrangle cons cells like that, but it should make handling cons cells and other values through a uniform interface much easier for the garbage collection part
+
+** syntax
+I'm thinking of copying some clojure syntax for shsl, clojure seems like a good syntax for scripty shit
+basically I'm thinking
+fn - defn - and %(%1 %2 %3) for function definitions, short and to the point
+[ ] for vector "literals"
+{ } for map "literals"
+
+although I'm still gonna pull a bunch of shit from cl instead
+from ~shsl.lisp~ 
+#+begin_src lisp
+;; I want the following lispy shit
+;; if let do lambda defvar defun defmacro set setq progn
+;; TODO: lambda lists?
+
+;; and the following scripty shit
+;; while until
+#+end_src
 
 * roadmap
 - [ ] finish the lisp version/prototype
