@@ -141,10 +141,23 @@
 (defun parse-off (s)
   (multiple-value-bind (l rst) (lex-off s)
 	(cond
-	  ;; handle brackets
-	  ((eq l '\() (parse-until rst :stop '\) :error-on '(\] \})))
-	  ((eq l '\[) (parse-until rst :stop '\] :error-on '(\) \})))
-	  ((eq l '\{) (parse-until rst :stop '\} :error-on '(\) \])))
+	  ;; handle various braces and bracket and shit
+	  ;; parens (lists)
+	  ((eq l '\()
+	   (parse-until rst :stop '\) :error-on '(\] \})))
+	  ;; square brackets (vector literals)
+	  ((eq l '\[)
+	   (multiple-value-bind
+			 (form rst) (parse-until rst :stop '\] :error-on '(\) \}))
+		 (values (list '|quotevec| form) rst)))
+	  ;; curly braces (map literals)
+	  ((eq l '\{)
+	   (multiple-value-bind
+			 (form rst) (parse-until rst :stop '\} :error-on '(\) \]))
+		 (values (list '|quotemap| form) rst)))
+	  ;; putting the proper values in the map and vector literals requires
+	  ;; evaluating the shit in there, so it's done at a later stage
+	  ;; of the interpreter (when the evaluator is available)
 
 	  ;; quote, quasiquote, comma
 	  ;; we use '|quote| instead of 'quote for consistency with how other
@@ -184,23 +197,24 @@
 						(rec after-expr (cons expr acc))))))))
 	(rec s (list))))
 
-;; (trace parse-off parse-until)
 ;; parse tests
+;; (trace parse-off parse-until)
 (assert (and
          (multiple-value-bind (form rst) (parse-off "(hello)")
            (and (equal form '(|hello|)) (equal rst "")))
 
-         (multiple-value-bind (form rst) (parse-off "([hello])")
+         (multiple-value-bind (form rst) (parse-off "((hello))")
            (and (equal form '((|hello|))) (equal rst "")))
 
-         (multiple-value-bind (form rst) (parse-off "([hello] bois)")
+         (multiple-value-bind (form rst) (parse-off "((hello) bois)")
            (and (equal form '((|hello|) |bois|)) (equal rst "")))
 
-         (multiple-value-bind (form rst) (parse-off "([{hello}] bois)")
+         (multiple-value-bind (form rst) (parse-off "(((hello)) bois)")
            (and (equal form '(((|hello|)) |bois|)) (equal rst "")))
 
          (multiple-value-bind (form rst) (parse-off "(+ 1 2)")
            (and (equal form '(+ 1 2)) (equal rst "")))
+
 
          (multiple-value-bind (form rst) (parse-off "'(+ 1 2)")
            (and (equal form '(|quote| (+ 1 2))) (equal rst "")))
@@ -210,8 +224,27 @@
 
          (multiple-value-bind (form rst) (parse-off ",(+ 1 2)")
            (and (equal form '(|comma| (+ 1 2))) (equal rst "")))
+
+
+         (multiple-value-bind (form rst) (parse-off "[+ 1 2]")
+           (and (equal form '(|quotevec| (+ 1 2)))
+				(equal rst "")))
+
+         (multiple-value-bind (form rst) (parse-off "{+ 1 2}")
+           (and (equal form '(|quotemap| (+ 1 2)))
+				(equal rst "")))
+
+         (multiple-value-bind (form rst) (parse-off "{+ [1 2]}")
+           (and (equal form '(|quotemap| (+ (|quotevec| (1 2)))))
+					   (equal rst "")))
+
+         (multiple-value-bind (form rst) (parse-off "{+ [1 2 (3)]}")
+           (and (equal form '(|quotemap| (+ (|quotevec| (1 2 (3))))))
+					   (equal rst "")))
          ))
 
+;; evaluator
+;; environment (frame and nested environments)
 (defclass shsl-frame ()
   ((bindings
 	:type hash-table
@@ -231,6 +264,8 @@
 	:accessor shsl-env-parent
 	:initform nil)))
 
+(defparameter *empty-env* (make-instance 'shsl-env))
+
 (defmethod lookup ((name symbol) (frame shsl-frame))
 	(gethash name (shsl-frame-bindings frame)))
 
@@ -240,8 +275,11 @@
 		  ((shsl-env-parent env) (lookup name (shsl-env-parent env)))
 		  (t (values nil nil)))))
 
-(defparameter *empty-env* (make-instance 'shsl-env))
-
+;; functions
+;; defined after environemnt because stealing scheme lexical scoping functions 
+;; end up holding a reference to the environment they were defined in
+;; 
+;; macros defined together with functions because they're just fancy functions
 (defclass shsl-fun ()
   ((env
 	:type shsl-env
@@ -263,6 +301,8 @@
 	:accessor shsl-builtin-macro-inner
 	:initarg :inner)))
 
+;; global enviromnent frame for shsl
+;; global function and macro definitions go here
 (defparameter *initial-env-frame*
   (let ((tb (make-hash-table)))
 	(macrolet ((builtin-fun-that (&body body)
@@ -271,19 +311,58 @@
 			   (builtin-macro-that (&body body)
 				 `(make-instance 'shsl-builtin-macro
 								 :inner (lambda (args) ,@body))))
-
-	  ;; no sanitization atm
+	  ;; builtin functions
 	  (setf (gethash '|+| tb) (builtin-fun-that
 							   (reduce #'+ args :initial-value 0)))
 	  (setf (gethash '|-| tb) (builtin-fun-that
 							   (- (car args)
 								  (reduce #'+ (cdr args) :initial-value 0))))
+	  (setf (gethash '|*| tb) (builtin-fun-that
+							   (reduce #'* args :initial-value 0)))
+	  (setf (gethash '|/| tb) (builtin-fun-that
+							   (assert (= 2 (length args)))
+							   (/ (car args) (cadr args))))
+
 	  (setf (gethash '|car| tb) (builtin-fun-that
+								 (assert (= 1 (length args)))
 								 (caar args)))
 	  (setf (gethash '|cdr| tb) (builtin-fun-that
+								 (assert (= 1 (length args)))
 								 (cdar args)))
 
-	  ;; no sanitization atm
+	  (setf (gethash '|setcar| tb) (builtin-fun-that
+									(assert (= 2 (length args)))
+									(rplaca (car args) (cadr args))))
+	  (setf (gethash '|setcdr| tb) (builtin-fun-that
+									(assert (= 2 (length args)))
+									(rplacd (car args) (cadr args))))
+
+	  (setf (gethash '|vecget| tb) (builtin-fun-that
+									(assert (= 2 (length args)))
+									(svref (car args) (cadr args))))
+	  (setf (gethash '|vecset| tb) (builtin-fun-that
+									(assert (= 3 (length args)))
+									(setf (svref (car args) (cadr args))
+										  (caddr args))))
+	  (setf (gethash '|veclen| tb) (builtin-fun-that
+									(assert (= 1 (length args)))
+									(array-dimension (car args) 0)))
+
+	  (setf (gethash '|mapget| tb) (builtin-fun-that
+									(assert (= 2 (length args)))
+									(gethash (car args) (cadr args))))
+	  (setf (gethash '|mapset| tb) (builtin-fun-that
+									(assert (= 3 (length args)))
+									(setf (gethash (car args) (cadr args))
+										  (caddr args))))
+
+	  ;; builtin macros
+	  (setf (gethash '|when| tb) nil)
+	  (setf (gethash '|unless| tb) nil)
+
+	  (setf (gethash '|until| tb) nil)
+
+	  (setf (gethash '|defn| tb) nil)
 
 	  (make-instance 'shsl-frame :bindings tb))))
 
@@ -304,13 +383,21 @@
 ;;   (let ((me1 (shsl-macroexpand-1 args)))
 ;; 	(
 
+;; TODO: replace the following "god" shsl-eval function with
+;; expressions
+;; translation of ast to expressions
+;; expression evaluation
+
+(defmacro longerr ((&rest strs) &rest args)
+  `(error (concatenate 'string ,@strs) ,@args))
+
 (defun shsl-eval (expr env)
   (if (not (consp expr))
 	  ;; eval atom
 	  (cond
-		((or (integerp expr) (stringp expr) (null expr))     ; self evaluating
+		((or (integerp expr) (stringp expr) (null expr))    ; self evaluating
 		 expr) 
-		((symbolp expr)                                      ; symbol lookup
+		((symbolp expr)                                     ; symbol lookup
 		 (multiple-value-bind (val found) (lookup expr env)
 		   (if found
 			   val
@@ -318,15 +405,38 @@
 		(t (error "unrecognized atomic expression ~A~%" expr)))
 
 	  ;; eval compound
-	  (cond
-		;; special forms (quote if let lambda while begin et al.)
-		((eq (car expr) '|quote|)
+	  (case (car expr)
+		;; special forms
+		;; quote
+		((|quote|)
 		 (unless (= (length expr) 2)
 		   (error "malformed quote expression ~A, incorrect length ~A !"
 				  expr (length expr)))
 		 (cadr expr))
 
-		((eq (car expr) '|if|)
+		;; vector literal
+		((|quotevec|)
+		 (unless (= (length expr) 2)
+		   (error "malformed quote expression ~A, incorrect length ~A !"
+				  expr (length expr)))
+		 (make-array (length (cadr expr))
+					 :initial-contents (mapcar (lambda (x) (shsl-eval x env))
+											   (cadr expr))))
+
+		;; map literal
+		((|quotemap|)
+		 (unless (= (length expr) 2)
+		   (error "malformed quote expression ~A, incorrect length ~A !"
+				  expr (length expr)))
+		 (hash-map-from-literal (cadr expr) env))
+
+		;; ((|set|)
+		;;  (shsl-eval-set (cdr expr) env))
+		;; set parallel
+		;; ((|setp|)
+		;;  (shsl-eval-setp (cdr expr) env))
+
+		((|if|)
 		 (unless (or (= (length expr) 3) (= (length expr) 4))
 		   (error "malformed if expression ~A, incorrect length ~A !"
 				  expr (length expr)))
@@ -334,9 +444,32 @@
 			 (shsl-eval (caddr expr) env)
 			 (shsl-eval (cadddr expr) env)))
 
-		;; macros and procedures
-		;; which can be either user defined or builtin
-		(t
+		;; do (in the clojure sense of begin)
+		((|do|)
+		 (let ((newenv (make-instance 'shsl-env
+									  :first (make-instance 'shsl-frame)
+									  :parent env)))
+		   (dolist (form (cdr expr))
+			 (shsl-eval form newenv))))
+
+		;; do-poking (shit o' mine for macros)
+		((|do-poking|)
+		 (dolist (form (cdr expr))
+		   (shsl-eval form env)))
+
+		;; let
+
+		;; while
+		;; (until will be defined as a macro compiling to while)
+
+		;; def
+
+		;; fn
+		;; (defn will be defiend as a macro compiling to def and fn)
+
+		;; non special forms, so either functions or macros
+		;; which can be either builtin or user defined
+		(otherwise
 		 (let ((operator (shsl-eval (car expr) env))
 			   (operands (cdr expr)))
 		   (cond ((shsl-fun-p operator)
@@ -347,7 +480,27 @@
 				  (shsl-eval
 				   (shsl-macroexpand-1 operator operands)
 				   env))
-				 (t (error "unrecognized operator ~A of expression ~A~%operator is neither a function or a macro~%" operator expr))))))))
+				 (t (longerr ("unrecognized operator ~A of expression ~A~% "
+							  "operator is neither a function nor a macro~%")
+						   operator expr))))))))
+
+(defun hash-map-from-literal (literal env)
+	(unless (= 0 (mod (length literal) 2))
+	  (longerr ("map literal ~A contains odd number of elements, "
+				"expected map literal to contain even number of "
+				"elements {key val key val key val ...}")
+			   literal))
+	(do* ((elts literal (cddr elts))
+		  (key (car elts) (car elts)) 
+		  (val (cadr elts) (cadr elts))
+		  (acc (let ((a (make-hash-table)))
+				 (setf (gethash key a) val)
+				 a)
+			   (if (atom key)
+				   (progn (setf (gethash key acc) (shsl-eval val env))
+						  acc)
+				   (error "non atomic key ~A in map literal~%" key))))
+		 ((null elts) acc)))
 
 (defmacro with-shsl-eval-str ((valsym str) &body body)
   `(multiple-value-bind (,valsym _) (parse-off ,str)
@@ -360,8 +513,13 @@
 		   (equal val '|a|))
 		 (with-shsl-eval-str (val "(+ 1 2)")
 		   (equal val 3))
-		 ))
 
+		 (with-shsl-eval-str (val "(mapget 'a {a 2})")
+		   (equal 2 val))
+
+		 (with-shsl-eval-str (val "{a 2}")
+		   (equal 2 (gethash '|a| val)))
+		 ))
 
 #|
 ;; for later, I think it'd be a good idea to have a clos adjacent thing
