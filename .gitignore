@@ -1,6 +1,7 @@
 # compilation output
 ./shsl
+./tests
 ./a.out
 
-# not using it rn
-./stb_ds.h
+# emacs shit
+./TAGS

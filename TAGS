@@ -1,0 +1,176 @@
+
+shsl.c,5757
+    SHSL_OBJ_NIL 27,862
+    SHSL_OBJ_NIL = 0, SHSL_OBJ_SYMBOL,27,862
+    SHSL_OBJ_INTEGER,28,902
+    SHSL_OBJ_INTEGER, SHSL_OBJ_REAL,28,902
+    SHSL_OBJ_INTEGER, SHSL_OBJ_REAL, SHSL_OBJ_STRING,28,902
+    SHSL_OBJ_CONS,31,974
+    SHSL_OBJ_CONS, SHSL_OBJ_MAP,31,974
+    SHSL_OBJ_CONS, SHSL_OBJ_MAP, SHSL_OBJ_VECTOR,31,974
+    SHSL_OBJ_ERROR,34,1038
+} SHSL_OBJECT_TYPE;35,1058
+typedef struct shsl_sym 39,1097
+    struct shsl_obj* name;40,1123
+} shsl_sym 41,1168
+typedef struct shsl_error 43,1182
+    struct shsl_obj* msg;44,1210
+    struct shsl_obj* data;45,1254
+} shsl_error;46,1281
+typedef struct shsl_cons 48,1296
+    struct shsl_obj* car;49,1323
+    struct shsl_obj* cdr;50,1349
+} shsl_cons 51,1375
+typedef struct shsl_vec 53,1390
+    struct shsl_obj** buf;54,1416
+    size_t size;55,1443
+    size_t capacity;56,1460
+} shsl_vec;57,1481
+typedef struct shsl_kv 60,1544
+    struct shsl_obj* k;61,1569
+    struct shsl_obj* v;62,1593
+} shsl_kv;63,1617
+typedef struct shsl_map 65,1629
+    shsl_kv* buf;66,1655
+    size_t size;67,1673
+    size_t capacity;68,1690
+} shsl_map;69,1711
+typedef struct shsl_obj 71,1724
+    int ref_count;73,1764
+    SHSL_OBJECT_TYPE type;74,1783
+	long i;78,1835
+	double r;79,1844
+	char* str;80,1855
+	shsl_sym sym;81,1867
+	shsl_cons cons;82,1882
+	shsl_vec vec;83,1899
+	shsl_map map;84,1914
+	shsl_error err;85,1929
+} shsl_obj;87,1953
+shsl_obj SHSL_NIL 89,1967
+void shsl_add_ref(98,2243
+void shsl_del_ref(102,2333
+shsl_obj* shsl_with_ref(112,2552
+void shsl_free_obj(117,2635
+shsl_obj* shsl_obj_mkint(180,4181
+shsl_obj* shsl_obj_mkreal(186,4375
+shsl_obj* shsl_obj_mkstr(192,4569
+shsl_obj* shsl_obj_mksym(205,4867
+shsl_obj* shsl_obj_mkerr(217,5149
+shsl_obj* shsl_obj_mkcons(230,5479
+void shsl_cons_set_cdr(240,5789
+void shsl_cons_set_car(246,5987
+shsl_obj* shsl_obj_mkvec(253,6186
+void shsl_vec_expand(268,6575
+void shsl_vec_push(277,6870
+shsl_obj* shsl_vec_ref(291,7226
+void shsl_vec_set(298,7456
+shsl_obj* shsl_obj_mkmap_empty(310,7814
+void shsl_map_expand(323,8164
+ssize_t shsl_map_index(335,8501
+shsl_obj* shsl_map_get(344,8739
+void shsl_map_set(351,8955
+bool shsl_obj_eq(376,9544
+    SHSL_TOK_NIL 423,10765
+    SHSL_TOK_NIL = 0, SHSL_TOK_SYMBOL,423,10765
+    SHSL_TOK_INTEGER,424,10804
+    SHSL_TOK_INTEGER, SHSL_TOK_REAL,424,10804
+    SHSL_TOK_INTEGER, SHSL_TOK_REAL, SHSL_TOK_STRING,424,10804
+    SHSL_TOK_QUOTE,427,10881
+    SHSL_TOK_QUOTE, SHSL_TOK_QUASIQUOTE,427,10881
+    SHSL_TOK_QUOTE, SHSL_TOK_QUASIQUOTE, SHSL_TOK_COMMA,427,10881
+    SHSL_TOK_OPEN_PAREN,430,10958
+    SHSL_TOK_OPEN_PAREN, SHSL_TOK_CLOSE_PAREN,430,10958
+    SHSL_TOK_OPEN_SQUARE,431,11005
+    SHSL_TOK_OPEN_SQUARE, SHSL_TOK_CLOSE_SQUARE,431,11005
+    SHSL_TOK_OPEN_CURLY,432,11054
+    SHSL_TOK_OPEN_CURLY, SHSL_TOK_CLOSE_CURLY,432,11054
+    SHSL_TOK_EOF,436,11164
+    SHSL_TOK_ERROR,438,11195
+} SHSL_TOKEN_TYPE;439,11215
+    SHSL_TOKEN_TYPE type;442,11252
+    shsl_obj* obj;443,11278
+} shsl_token;444,11297
+    shsl_token token;446,11328
+    char* remaining;447,11350
+} lexer_pair;448,11371
+shsl_token empty_token(453,11513
+lexer_pair error_lexer_pair(462,11746
+bool is_special_char(474,12094
+bool is_symbol_char(482,12368
+bool try_parse_integer(489,12659
+char* slice_to_fresh_str(509,13044
+shsl_token parse_non_special_token(520,13440
+lexer_pair token_off(543,13962
+    shsl_obj* obj;631,16427
+    char* remaining;632,16446
+} parser_pair;633,16467
+parser_pair parse_off(640,16630
+parser_pair parse_until(737,19235
+    SHSL_EXPR_LITERAL,788,20647
+    SHSL_EXPR_MAP,789,20670
+    SHSL_EXPR_VECTOR,790,20689
+    SHSL_EXPR_LOOKUP,791,20711
+    SHSL_EXPR_IF,793,20735
+    SHSL_EXPR_LET,794,20753
+    SHSL_EXPR_WHILE,795,20772
+    SHSL_EXPR_DO,796,20793
+    SHSL_EXPR_DO_POKING,797,20811
+    SHSL_EXPR_DEF,799,20837
+    SHSL_EXPR_SET,800,20856
+    SHSL_EXPR_FN,802,20876
+    SHSL_EXPR_MACRO,803,20894
+    SHSL_EXPR_FUNCALL,805,20916
+} SHSL_EXPRESSION_TYPE;806,20939
+typedef struct if_expr 821,21475
+    struct shsl_expression* condition;822,21500
+    struct shsl_expression* then_part;823,21539
+    struct shsl_expression* else_part;824,21578
+} if_expr;825,21617
+typedef struct do_expr 827,21629
+    struct shsl_expression* body;828,21654
+    size_t body_length;829,21688
+} do_expr;830,21712
+typedef struct do_poking_expr 832,21724
+    struct shsl_expression* body;833,21756
+    size_t body_length;834,21790
+} do_poking_expr;835,21814
+typedef struct def_expr 837,21833
+    shsl_obj* name;838,21859
+    struct shsl_exppression* value;839,21907
+} def_expr;840,21943
+typedef struct set_expr{set_expr842,21956
+    shsl_obj* name;843,21981
+    struct shsl_exppression* value;844,22029
+} set_expr;845,22065
+typedef struct shsl_expression 847,22078
+    SHSL_EXPRESSION_TYPE type;848,22111
+	shsl_obj* literal;850,22154
+	shsl_obj* lookup_symbol;851,22174
+	shsl_obj* vec;852,22218
+	shsl_obj* map;853,22262
+	if_expr if_expr;855,22304
+	do_expr do_expr;856,22322
+	do_poking_expr do_poking_expr;857,22340
+	def_expr def_expr;858,22372
+	set_expr set_expr;859,22392
+} shsl_expression;861,22419
+bool shsl_is_nil(863,22439
+bool shsl_is_cons(867,22514
+bool shsl_is_err(871,22591
+bool shsl_is_list(875,22668
+bool shsl_is_well_formed_list(881,22859
+ssize_t shsl_list_length(895,23103
+#define return_error(909,23350
+shsl_obj* shsl_nthcdr(915,23483
+shsl_obj* shsl_nth(925,23691
+bool shsl_is_truthy(937,24042
+#define return_mallocd_expr(943,24261
+#define return_error_expr(950,24475
+bool shsl_expr_is_error(958,24722
+shsl_expression* shsl_form_to_expr(963,24860
+shsl_obj* shsl_obj_copy(1057,27547
+shsl_obj* shsl_eval(1062,27638
+void shsl_dbg_fputobj(1076,28019
+void shsl_dbg_fputtok(1109,28857
+int main(1163,30204
