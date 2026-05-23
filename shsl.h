@@ -124,6 +124,8 @@ bool shsl_is_err(shsl_obj* obj);
 bool shsl_is_truthy(shsl_obj* obj);
 bool shsl_is_list(shsl_obj* obj);
 bool shsl_is_well_formed_list(shsl_obj* list_obj);
+bool shsl_is_vec(shsl_obj* obj);
+bool shsl_is_map(shsl_obj* obj);
 
 /// LIST OPERATIONS DECLARATIONS
 shsl_obj* shsl_car(shsl_obj* obj);
@@ -347,61 +349,40 @@ shsl_obj* shsl_obj_mkint(long l) {
     return_mallocd_obj(.ref_count = 0, .type = SHSL_OBJ_INTEGER, .i = l);
 }
 shsl_obj* shsl_obj_mkreal(double d) {
-    shsl_obj* obj_p = (shsl_obj*)malloc(sizeof(shsl_obj));
-    *obj_p = (shsl_obj)
-	{ .ref_count = 0, .type = SHSL_OBJ_REAL, .r = d, };
-    return obj_p;
+    return_mallocd_obj(.ref_count = 0, .type = SHSL_OBJ_REAL, .r = d);
 }
 shsl_obj* shsl_obj_mkstr(const char* str) {
-    shsl_obj* obj_p = (shsl_obj*)malloc(sizeof(shsl_obj));
     char* c = (char*)malloc(strlen(str) * sizeof(char));
     strcpy(c, str);
-    *obj_p = (shsl_obj)
-	{
-	    .ref_count = 0,
-	    .type = SHSL_OBJ_STRING,
-	    .str = c,
-	};
-    return obj_p;
+    return_mallocd_obj(.ref_count = 0, .type = SHSL_OBJ_STRING, .str = c);
 }
 shsl_obj* shsl_obj_mksym(const char* name) {
-    shsl_obj* sym_obj = (shsl_obj*)malloc(sizeof(shsl_obj));
-    *sym_obj = (shsl_obj) {
-	.ref_count = 0,
-	.type = SHSL_OBJ_SYMBOL,
-	.sym = (shsl_sym) {
-	    .name = shsl_add_ref(shsl_obj_mkstr(name)),
-	},
-    };
-    return sym_obj;
+    return_mallocd_obj(.ref_count = 0,
+		       .type = SHSL_OBJ_SYMBOL,
+		       .sym = (shsl_sym){
+			   .name = shsl_add_ref(shsl_obj_mkstr(name)),
+		       });
 }
 shsl_obj* shsl_obj_mkerr(const char* msg, shsl_obj* data) {
-    shsl_obj* err_obj = (shsl_obj*)malloc(sizeof(shsl_obj));
-    *err_obj = (shsl_obj) {
-	.ref_count = 0,
-	.type = SHSL_OBJ_ERROR,
-	.err = (shsl_error) {
-	    .msg = shsl_add_ref(shsl_obj_mkstr(msg)),
-	    .data = shsl_add_ref(data),
-	},
-    };
-    return err_obj;
+    return_mallocd_obj(.ref_count = 0,
+		       .type = SHSL_OBJ_ERROR,
+		       .err = (shsl_error) {
+			   .msg = shsl_add_ref(shsl_obj_mkstr(msg)),
+			   .data = shsl_add_ref(data),
+		       });
 }
 shsl_obj* shsl_obj_mkcons(shsl_obj* car, shsl_obj* cdr) {
-    shsl_obj* cons_obj = (shsl_obj*)(malloc)(sizeof(shsl_obj));
-    *cons_obj = (shsl_obj) {
+    return_mallocd_obj(
 	.ref_count = 0,
 	.type = SHSL_OBJ_CONS,
 	.cons = (shsl_cons) { .car = shsl_add_ref(car),
 			      .cdr = shsl_add_ref(cdr), }
-    };
-    return cons_obj;
+    );
 }
 shsl_obj* shsl_obj_mkvec(size_t initial_capacity) {
     assert(initial_capacity > 0);
 
-    shsl_obj* obj_p = (shsl_obj*)malloc(sizeof(shsl_obj));
-    *obj_p = (shsl_obj) {
+    return_mallocd_obj(
 	.ref_count = 0,
 	.type = SHSL_OBJ_VECTOR,
 	.vec = (shsl_vec) {
@@ -409,12 +390,11 @@ shsl_obj* shsl_obj_mkvec(size_t initial_capacity) {
 	    .size = 0,
 	    .capacity = initial_capacity,
 	},
-    };
-    return obj_p;
+    );
 }
 shsl_obj* shsl_obj_mkmap(size_t initial_capacity) {
-    shsl_obj* obj_p = (shsl_obj*)malloc(sizeof(shsl_obj));
-    *obj_p = (shsl_obj) {
+    assert(initial_capacity > 0);
+    return_mallocd_obj(
 	.ref_count = 0,
 	.type = SHSL_OBJ_MAP,
 	.map = (shsl_map){
@@ -422,17 +402,68 @@ shsl_obj* shsl_obj_mkmap(size_t initial_capacity) {
 	    .size = 0,
 	    .capacity = initial_capacity,
 	}
-    };
-    return obj_p;
+    );
 }
-shsl_obj* shsl_obj_mkbuiltin_fun(shsl_obj* env, shsl_obj*(*apply)(shsl_obj* args));
-shsl_obj* shsl_obj_mkbuiltin_macro(shsl_obj* env, shsl_obj*(*expand)(shsl_obj* args));
-// this one bit is kinda ugly
-struct shsl_expression;
+shsl_obj* shsl_obj_mkbuiltin_fun(shsl_obj* env, shsl_obj*(*apply)(shsl_obj* args)) {
+    assert(shsl_is_list(env) && "function env must be list!");
+
+    return_mallocd_obj(
+	.ref_count = 0,
+	.type = SHSL_OBJ_BUILTIN_FUN,
+	.builtin_fun = (shsl_builtin_fun) {
+	    .env = env,
+	    .apply = apply,
+	}
+    );
+}
+shsl_obj* shsl_obj_mkbuiltin_macro(shsl_obj* env, shsl_obj*(*expand)(shsl_obj* args)) {
+    assert(shsl_is_list(env) && "macro env must be list!");
+
+    return_mallocd_obj(
+	.ref_count = 0,
+	.type = SHSL_OBJ_BUILTIN_MACRO,
+	.builtin_macro = (shsl_builtin_fun) {
+	    .env = env,
+	    .apply = expand,
+	}
+    );
+}
 shsl_obj* shsl_obj_mkuser_fun(shsl_obj* env, shsl_obj* lambda_list,
-			      struct shsl_expression* body, size_t body_len);
+			      struct shsl_expression* body, size_t body_len) {
+    assert(shsl_is_list(env) && "function env must be list!");
+    assert(shsl_is_vec(lambda_list) && "function lambda list must be list!");
+    assert(body && "function body cannot be null pointer!");
+    assert(body_len > 0 && "function body length cannot be null!");
+
+    return_mallocd_obj(
+	.ref_count = 0,
+	.type = SHSL_OBJ_USER_FUN,
+	.user_fun = (shsl_user_fun) {
+	    .env = env,
+	    .lambda_list = lambda_list,
+	    .body = body,
+	    .body_len = body_len,
+	}
+    );
+}
 shsl_obj* shsl_obj_mkuser_macro(shsl_obj* env, shsl_obj* lambda_list,
-				struct shsl_expression* body, size_t body_len);
+				struct shsl_expression* body, size_t body_len) {
+    assert(shsl_is_list(env) && "macro env must be list!");
+    assert(shsl_is_vec(lambda_list) && "macro lambda list must be list!");
+    assert(body && "macro body cannot be null pointer!");
+    assert(body_len > 0 && "macro body length cannot be null!");
+
+    return_mallocd_obj(
+	.ref_count = 0,
+	.type = SHSL_OBJ_USER_MACRO,
+	.user_macro = (shsl_user_fun) {
+	    .env = env,
+	    .lambda_list = lambda_list,
+	    .body = body,
+	    .body_len = body_len,
+	}
+    );
+}
 
 /// DATA OPERATIONS DEFINITIONS
 /// GENERIC OPERATIONS DEFINITIONS
@@ -691,6 +722,14 @@ bool shsl_is_well_formed_list(shsl_obj* list_obj) {
 	    return false;
 	}
     }
+}
+
+bool shsl_is_vec(shsl_obj* obj) {
+    return obj->type == SHSL_OBJ_VECTOR;
+}
+
+bool shsl_is_map(shsl_obj* obj) {
+    return obj->type == SHSL_OBJ_MAP;
 }
 
 /// LIST OPERATIONS DEFINITIONS
