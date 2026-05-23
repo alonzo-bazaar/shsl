@@ -1,7 +1,10 @@
 # compilation output
-./shsl
-./tests
-./a.out
+shsl
+tests
+a.out
 
 # emacs shit
-./TAGS
+TAGS
+
+# gdb&Co. shit
+*.h.gch
