@@ -16,15 +16,31 @@
 #include<string.h>
 #include<assert.h>
 
+// dumb utilities
 #define defstruct(s) struct s; typedef struct s s
-#define defenum(e) enum e; typedef enum e e
 
 //// DATA DECLARATIONS
 //// ----------------------------------------------------------------------------
 
 /// DATA TYPES DECLARATIONS
 // type tag for shsl objects
-defenum(SHSL_OBJECT_TYPE);
+typedef enum SHSL_OBJECT_TYPE {
+    // atoms
+    // nil first so an object initialized as {0} is nil
+    SHSL_OBJ_NIL = 0, SHSL_OBJ_SYMBOL, 
+    SHSL_OBJ_INTEGER, SHSL_OBJ_REAL, SHSL_OBJ_STRING,
+
+    // collections
+    SHSL_OBJ_CONS, SHSL_OBJ_MAP, SHSL_OBJ_VECTOR,
+
+    // functions and macros
+    SHSL_OBJ_BUILTIN_FUN, SHSL_OBJ_USER_FUN, 
+    SHSL_OBJ_BUILTIN_MACRO, SHSL_OBJ_USER_MACRO, 
+
+    // error
+    SHSL_OBJ_ERROR,
+} SHSL_OBJECT_TYPE;
+
 // tagged union of all possible shsl objects
 defstruct(shsl_obj);
 // possible shsl objects
@@ -39,6 +55,10 @@ defstruct(shsl_vec);
 defstruct(shsl_kv);
 // map as vector of kv pairs
 defstruct(shsl_map);
+defstruct(shsl_builtin_fun);
+defstruct(shsl_user_fun);
+// we don't have macro types as macros are just gonna be functions with different
+// type tags that we run at a different moment (compile/expand time instead of runtime)
 
 /// DATA CONSTRUCTION DECLARATIONS
 // we handle everything through pointers because havnig everything
@@ -106,7 +126,25 @@ ssize_t shsl_list_length(shsl_obj* list_obj);
 //// ----------------------------------------------------------------------------
 
 // possible types a token may assume
-defenum(SHSL_TOKEN_TYPE);
+typedef enum SHSL_TOKEN_TYPE {
+    // literals
+    SHSL_TOK_NIL = 0, SHSL_TOK_SYMBOL,
+    SHSL_TOK_INTEGER, SHSL_TOK_REAL, SHSL_TOK_STRING,
+
+    // (quasi)quoting
+    SHSL_TOK_QUOTE, SHSL_TOK_QUASIQUOTE, SHSL_TOK_COMMA,
+
+    // parentheses
+    SHSL_TOK_OPEN_PAREN, SHSL_TOK_CLOSE_PAREN,
+    SHSL_TOK_OPEN_SQUARE, SHSL_TOK_CLOSE_SQUARE,
+    SHSL_TOK_OPEN_CURLY, SHSL_TOK_CLOSE_CURLY,
+
+    // we then have special token types to express
+    // eof
+    SHSL_TOK_EOF,
+    // error
+    SHSL_TOK_ERROR,
+} SHSL_TOKEN_TYPE;
 // TODO: not a tagged union yet but I'm working on it
 defstruct(shsl_token);
 // pair of read token/remaining string after token
@@ -159,7 +197,26 @@ parser_pair parse_until(char* str,
 //// ----------------------------------------------------------------------------
 
 /// EXPRESSION TYPE DECLARATIONS
-defenum(SHSL_EXPRESSION_TYPE);
+typedef enum SHSL_EXPRESSION_TYPE {
+    SHSL_EXPR_LITERAL,
+    SHSL_EXPR_MAP,
+    SHSL_EXPR_VECTOR,
+    SHSL_EXPR_LOOKUP,
+	
+    SHSL_EXPR_IF,
+    SHSL_EXPR_LET,
+    SHSL_EXPR_WHILE,
+    SHSL_EXPR_DO,
+    SHSL_EXPR_DO_POKING,
+
+    SHSL_EXPR_DEF,
+    SHSL_EXPR_SET,
+
+    SHSL_EXPR_FN,
+    SHSL_EXPR_MACRO,
+
+    SHSL_EXPR_FUNCALL,
+} SHSL_EXPRESSION_TYPE;
 defstruct(if_expr);
 defstruct(do_expr);
 defstruct(do_poking_expr);
@@ -190,18 +247,6 @@ void shsl_dbg_fputobj(const shsl_obj* obj, FILE* restrict stream);
 //// ----------------------------------------------------------------------------
 
 /// DATA TYPES DEFINITIONS
-typedef enum SHSL_OBJECT_TYPE {
-    // atoms
-    // nil first so an object initialized as {0} is nil
-    SHSL_OBJ_NIL = 0, SHSL_OBJ_SYMBOL, 
-    SHSL_OBJ_INTEGER, SHSL_OBJ_REAL, SHSL_OBJ_STRING,
-
-    // composite
-    SHSL_OBJ_CONS, SHSL_OBJ_MAP, SHSL_OBJ_VECTOR,
-
-    // error
-    SHSL_OBJ_ERROR,
-} SHSL_OBJECT_TYPE;
 typedef struct shsl_sym {
     shsl_obj* name; // must be string
 } shsl_sym ;
@@ -228,6 +273,17 @@ typedef struct shsl_map {
     size_t size;
     size_t capacity;
 } shsl_map;
+typedef struct shsl_builtin_fun {
+    shsl_obj* env;
+    shsl_obj*(*apply)(shsl_obj* env, shsl_obj* args);
+} shsl_builtin_fun;
+typedef struct shsl_user_fun {
+    shsl_obj* env;
+    shsl_obj* lambda_list;
+    shsl_expression* body;
+    size_t body_len;
+} shsl_user_fun;
+
 typedef struct shsl_obj {
     // header
     int ref_count;
@@ -238,10 +294,18 @@ typedef struct shsl_obj {
 	long i;
 	double r;
 	char* str;
+
 	shsl_sym sym;
 	shsl_cons cons;
+
 	shsl_vec vec;
 	shsl_map map;
+
+	shsl_builtin_fun builtin_fun;
+	shsl_user_fun user_fun;
+	shsl_builtin_fun builtin_macro;
+	shsl_user_fun user_macro;
+
 	shsl_error err;
     };
 } shsl_obj;	
@@ -261,11 +325,14 @@ shsl_obj SHSL_NIL = {0};
 // this, although inefficient, ensures that all the data contained in shsl
 // objects can be safely managed by our autoamtic memory management
 // and prevents weird data races we may encounter at the language boundary
+#define return_mallocd_obj(...) do {				\
+	shsl_obj* obj = (shsl_obj*)malloc(sizeof(shsl_obj));	\
+	*obj = (shsl_obj){__VA_ARGS__};				\
+	return obj;						\
+    } while(0)
+
 shsl_obj* shsl_obj_mkint(long l) {
-    shsl_obj* obj_p = (shsl_obj*)malloc(sizeof(shsl_obj));
-    *obj_p = (shsl_obj)
-	{ .ref_count = 0, .type = SHSL_OBJ_INTEGER, .i = l, };
-    return obj_p;
+    return_mallocd_obj(.ref_count = 0, .type = SHSL_OBJ_INTEGER, .i = l);
 }
 shsl_obj* shsl_obj_mkreal(double d) {
     shsl_obj* obj_p = (shsl_obj*)malloc(sizeof(shsl_obj));
@@ -456,6 +523,12 @@ bool shsl_obj_eq(shsl_obj* lhs, shsl_obj* rhs) {
 			    shsl_map_get(rhs, lhs->map.buf[i].k)))
 		return false;
 	return true;
+    case SHSL_OBJ_BUILTIN_FUN:
+    case SHSL_OBJ_USER_FUN:
+    case SHSL_OBJ_BUILTIN_MACRO:
+    case SHSL_OBJ_USER_MACRO:
+	fprintf(stderr, "TODO: this comparison's not implemeneted yet!\n");
+	return false;
     }
     assert(0 && "UNREACHABLE");
 }
@@ -603,7 +676,7 @@ bool shsl_is_well_formed_list(shsl_obj* list_obj) {
 /// LIST OPERATIONS DEFINITIONS
 #ifdef SHSL_LOG_RETURN_ERROR
 #define return_error(data, msg, ...) do{                        \
-	fprintf(stderr, "[ERROR] "msg"\n", __VA_ARGS__);        \
+	fprintf(stderr, "[ERROR] "msg"\n"/*, __VA_ARGS__*/);	\
 	return shsl_obj_mkerr(msg, data);                       \
     } while(0)
 #else
@@ -660,25 +733,6 @@ ssize_t shsl_list_length(shsl_obj* list_obj) {
 
 //// LEXER DEFINITIONS
 //// ----------------------------------------------------------------------------
-typedef enum SHSL_TOKEN_TYPE {
-    // literals
-    SHSL_TOK_NIL = 0, SHSL_TOK_SYMBOL,
-    SHSL_TOK_INTEGER, SHSL_TOK_REAL, SHSL_TOK_STRING,
-
-    // (quasi)quoting
-    SHSL_TOK_QUOTE, SHSL_TOK_QUASIQUOTE, SHSL_TOK_COMMA,
-
-    // parentheses
-    SHSL_TOK_OPEN_PAREN, SHSL_TOK_CLOSE_PAREN,
-    SHSL_TOK_OPEN_SQUARE, SHSL_TOK_CLOSE_SQUARE,
-    SHSL_TOK_OPEN_CURLY, SHSL_TOK_CLOSE_CURLY,
-
-    // we then have special token types to express
-    // eof
-    SHSL_TOK_EOF,
-    // error
-    SHSL_TOK_ERROR,
-} SHSL_TOKEN_TYPE;
 typedef struct shsl_token {
     SHSL_TOKEN_TYPE type;
     shsl_obj* obj;
@@ -1036,26 +1090,6 @@ parser_pair parse_until(char* str,
 //// ----------------------------------------------------------------------------
 
 /// EXPRESSION TYPE DEFINITIONS
-typedef enum SHSL_EXPRESSION_TYPE {
-    SHSL_EXPR_LITERAL,
-    SHSL_EXPR_MAP,
-    SHSL_EXPR_VECTOR,
-    SHSL_EXPR_LOOKUP,
-	
-    SHSL_EXPR_IF,
-    SHSL_EXPR_LET,
-    SHSL_EXPR_WHILE,
-    SHSL_EXPR_DO,
-    SHSL_EXPR_DO_POKING,
-
-    SHSL_EXPR_DEF,
-    SHSL_EXPR_SET,
-
-    SHSL_EXPR_FN,
-    SHSL_EXPR_MACRO,
-
-    SHSL_EXPR_FUNCALL,
-} SHSL_EXPRESSION_TYPE;
 // NOTE
 // literals don't own the expression they're literals of, they hold a ref to it
 // when deleting literals, only decrease the refcount of the ref
@@ -1115,7 +1149,7 @@ typedef struct shsl_expression {
 
 #ifdef SHSL_LOG_RETURN_ERROR_EXPR
 #define return_error_expr(form, msg, ...) do{                           \
-	fprintf(stderr, "[ERROR] WHILE PARSING: "msg"\n", __VA_ARGS__); \
+	fprintf(stderr, "[ERROR] WHILE PARSING: "msg"\n"/*, __VA_ARGS__ */); \
 	return &(shsl_expression) {                                     \
 	    .type = SHSL_EXPR_LITERAL,                                  \
 	    .literal = shsl_obj_mkerr(msg, form),                       \
@@ -1231,10 +1265,18 @@ shsl_expression* shsl_form_to_expr(shsl_obj* form) {
 		assert(0 && "TODO: FUNCALL (symbol)");
 
 	}
+	break;
 	// else if lambda_expr_p(c->cons.car)
 	// { compile to immediate lambda call }
 	// else
 	// { error }
+    case SHSL_OBJ_BUILTIN_FUN:
+    case SHSL_OBJ_USER_FUN:
+    case SHSL_OBJ_BUILTIN_MACRO:
+    case SHSL_OBJ_USER_MACRO:
+	return_error_expr
+	    (form,
+	     "cannot include function object in source code of expression!"); 
     }
     assert(0 && "UNREACHABLE");
 }
@@ -1342,6 +1384,10 @@ void shsl_dbg_fputobj(const shsl_obj* obj, FILE* restrict stream) {
 	break;
     case SHSL_OBJ_VECTOR:
     case SHSL_OBJ_MAP:
+    case SHSL_OBJ_BUILTIN_FUN:
+    case SHSL_OBJ_USER_FUN:
+    case SHSL_OBJ_BUILTIN_MACRO:
+    case SHSL_OBJ_USER_MACRO:
 	fprintf(stderr, "NOT HANDLED YET");
     };
 }
