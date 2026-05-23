@@ -1,0 +1,71 @@
+* Overall Structure
+~shsl.h~ is an stb like library, meaning it's organized like
+#+begin_src c
+  // declarations
+  #ifdef SHSL_IMPLEMENTATION
+  // definitions
+  #endif
+#+end_src
+
+Includes (like ~#include<stdio.h>~ &Co.) go above the declarations so we can use included types in the declarations, macros go in the definitions unless they're part of shsl's API (none so far)
+
+** declarations order
+Given that we forward declare everything the only bound we have on declarations is that we must declare a structure before declaring functions manipulating that structure.
+We don't care much about declaring lower level functions above higher level functions, just declare things in an order that makes sense to read top to bottom.
+
+** sections/subsections
+Shsl is quite a large file so declarations are divided into sections and subsections,
+functions that do similar things should be defined close to each other and in the same section/subsection.
+
+The order of sections/subsections/declarations in the declarations must match the order of sections/subsections/definitions in the definitions.
+
+Sections and subsections have special comments to mark the beginning of a section or subsection,
+comments delimiting sections/subsections start look like
+#+begin_src c
+  //// [SECTION NAME] DECLARATIONS
+  //// ----------------------------------------------------------------------------
+
+  /// [SUBSECTION 1 NAME] DECLARATIONS
+  /// [SUBSECTION 2 NAME] DECLARATIONS
+  /// [SUBSECTION 3 NAME] DECLARATIONS
+
+  #ifdef SHSL_IMPLEMENTATION
+  //// [SECTION NAME] DEFINITIONS
+  //// ----------------------------------------------------------------------------
+
+  /// [SUBSECTION 1 NAME] DEFINITIONS
+  /// [SUBSECTION 2 NAME] DEFINITIONS
+  /// [SUBSECTION 3 NAME] DEFINITIONS
+  #endif 
+#+end_src
+and these comments should be in all caps to easily tell them apart from other comments.
+
+Section comments mark the start of major modules in shsl, so far those are
+- lexer
+- parser
+- evaluator
+- print debugging
+this list is not final.
+
+Subsections are for major chunks of those major modules 
+- it is not mandatory to divide sections in subsections
+- if you split a section in subsections it is not mandatory to have every declaration/definition of that section be in a subsection, you can have declarations/definitions before the start of the first named subsection
+- subsections cannot overlap
+
+** Struct Ceclarations
+We forward declare all structs used as opaque ~struct struct_name;~, the structs are later defined through ~typedef struct struct_name { ... } struct_name;~ in the definitions.
+
+* Comments
+- Comments about the raison d'etre of an api or aspect thereof go above the declaration of that function/struct, unless that aspect is best explained with the definition on hand, in which case the aspect is still documented in the declarations insofar as it affects the api, then discussed in more detail closer to the definition
+- comments about overall black box view of "this function does.../this struct is..." go above the declaration of that function/struct
+- comments about some implementation aspect of the function go above the definition of that function
+
+as a special case of the last point, comments about who owns what (thus also, who deletes what when they're deleted) should go in the definitions.
+
+* Case ConventionS (DO We use camelCase or snake_case for xyz?)
+- Functions are ~snake_case~
+- structs are ~snake_case~
+- variables names are ~snake_case~
+- enums are ~ALL_CAPS_SNAKE_CASE~
+
+I just like snake case.

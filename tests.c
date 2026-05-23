@@ -1,5 +1,7 @@
 #include<stdio.h>
 #include<assert.h>
+
+#define SHSL_IMPLEMENTATION
 #include"shsl.h"
 
 shsl_obj* eval_str(char* c) {
