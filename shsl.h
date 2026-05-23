@@ -69,6 +69,18 @@ shsl_obj* shsl_obj_mkstr(const char* str);
 shsl_obj* shsl_obj_mksym(const char* name);
 shsl_obj* shsl_obj_mkerr(const char* msg, shsl_obj* data);
 shsl_obj* shsl_obj_mkcons(shsl_obj* car, shsl_obj* cdr);
+shsl_obj* shsl_obj_mkmap(size_t initial_capacity);
+shsl_obj* shsl_obj_mkvec(size_t initial_capacity);
+shsl_obj* shsl_obj_mkbuiltin_fun(shsl_obj* env,
+				 shsl_obj*(*apply)(shsl_obj* args));
+shsl_obj* shsl_obj_mkbuiltin_macro(shsl_obj* env,
+				   shsl_obj*(*expand)(shsl_obj* args));
+// this one bit is kinda ugly
+struct shsl_expression;
+shsl_obj* shsl_obj_mkuser_fun(shsl_obj* env, shsl_obj* lambda_list,
+			      struct shsl_expression* body, size_t body_len);
+shsl_obj* shsl_obj_mkuser_macro(shsl_obj* env, shsl_obj* lambda_list,
+				struct shsl_expression* body, size_t body_len);
 
 /// DATA OPERATIONS DECLARATIONS
 /// GENERIC OPERATIONS DECLARATIONS (copy, delete, refcount shit)
@@ -274,12 +286,12 @@ typedef struct shsl_map {
     size_t capacity;
 } shsl_map;
 typedef struct shsl_builtin_fun {
-    shsl_obj* env;
-    shsl_obj*(*apply)(shsl_obj* env, shsl_obj* args);
+    shsl_obj* env;                     // must be cons list of maps
+    shsl_obj*(*apply)(shsl_obj* args); // must be vector
 } shsl_builtin_fun;
 typedef struct shsl_user_fun {
-    shsl_obj* env;
-    shsl_obj* lambda_list;
+    shsl_obj* env;                     // must be cons list of maps
+    shsl_obj* lambda_list;             // must be vector
     shsl_expression* body;
     size_t body_len;
 } shsl_user_fun;
@@ -413,6 +425,14 @@ shsl_obj* shsl_obj_mkmap(size_t initial_capacity) {
     };
     return obj_p;
 }
+shsl_obj* shsl_obj_mkbuiltin_fun(shsl_obj* env, shsl_obj*(*apply)(shsl_obj* args));
+shsl_obj* shsl_obj_mkbuiltin_macro(shsl_obj* env, shsl_obj*(*expand)(shsl_obj* args));
+// this one bit is kinda ugly
+struct shsl_expression;
+shsl_obj* shsl_obj_mkuser_fun(shsl_obj* env, shsl_obj* lambda_list,
+			      struct shsl_expression* body, size_t body_len);
+shsl_obj* shsl_obj_mkuser_macro(shsl_obj* env, shsl_obj* lambda_list,
+				struct shsl_expression* body, size_t body_len);
 
 /// DATA OPERATIONS DEFINITIONS
 /// GENERIC OPERATIONS DEFINITIONS
@@ -1263,6 +1283,12 @@ shsl_expression* shsl_form_to_expr(shsl_obj* form) {
 		assert(0 && "TODO: DEF");
 	    else
 		assert(0 && "TODO: FUNCALL (symbol)");
+		// return_mallocd_expr(.type = SHSL_EXPR_IF,
+		// 		    .if_expr = (if_expr) {
+		// 			.condition = c,
+		// 			.then_part = t,
+		// 			.else_part = e
+		// 		    });
 
 	}
 	break;
@@ -1298,6 +1324,19 @@ shsl_obj* shsl_eval(shsl_expression* form, shsl_obj* env) {
     default:
 	assert(0 && "TODO");
     }
+}
+
+shsl_obj* shsl_make_initial_frame() {
+    shsl_obj* map_obj = shsl_obj_mkmap(20);
+    shsl_obj* t = shsl_obj_mksym("t");
+    shsl_map_set(map_obj, t, t); // t is self evaluating
+    // shsl_map_set(map_obj, shsl_obj_mksym("+"),
+    // 		 shsl_obj_mkbuiltin_fun(shsl_fun_add_all));
+    return map_obj;
+}
+
+shsl_obj* shsl_make_initial_env() {
+    return shsl_obj_mkcons(shsl_make_initial_frame(), &SHSL_NIL);
 }
 
 //// PRINT DEBUGGING DEFINITIONS

@@ -1,178 +1,208 @@
 
-shsl.h,5855
-typedef enum SHSL_OBJECT_TYPE 58,1948
-    SHSL_OBJ_NIL 61,2049
-    SHSL_OBJ_NIL = 0, SHSL_OBJ_SYMBOL,61,2049
-    SHSL_OBJ_INTEGER,62,2089
-    SHSL_OBJ_INTEGER, SHSL_OBJ_REAL,62,2089
-    SHSL_OBJ_INTEGER, SHSL_OBJ_REAL, SHSL_OBJ_STRING,62,2089
-    SHSL_OBJ_CONS,65,2161
-    SHSL_OBJ_CONS, SHSL_OBJ_MAP,65,2161
-    SHSL_OBJ_CONS, SHSL_OBJ_MAP, SHSL_OBJ_VECTOR,65,2161
-    SHSL_OBJ_ERROR,68,2225
-} SHSL_OBJECT_TYPE;69,2245
-typedef struct shsl_sym 73,2284
-    struct shsl_obj* name;74,2310
-} shsl_sym 75,2355
-typedef struct shsl_error 77,2369
-    struct shsl_obj* msg;78,2397
-    struct shsl_obj* data;79,2441
-} shsl_error;80,2468
-typedef struct shsl_cons 82,2483
-    struct shsl_obj* car;83,2510
-    struct shsl_obj* cdr;84,2536
-} shsl_cons 85,2562
-typedef struct shsl_vec 87,2577
-    struct shsl_obj** buf;88,2603
-    size_t size;89,2630
-    size_t capacity;90,2647
-} shsl_vec;91,2668
-typedef struct shsl_kv 94,2731
-    struct shsl_obj* k;95,2756
-    struct shsl_obj* v;96,2780
-} shsl_kv;97,2804
-typedef struct shsl_map 99,2816
-    shsl_kv* buf;100,2842
-    size_t size;101,2860
-    size_t capacity;102,2877
-} shsl_map;103,2898
-typedef struct shsl_obj 105,2911
-    int ref_count;107,2951
-    SHSL_OBJECT_TYPE type;108,2970
-	long i;112,3022
-	double r;113,3031
-	char* str;114,3042
-	shsl_sym sym;115,3054
-	shsl_cons cons;116,3069
-	shsl_vec vec;117,3086
-	shsl_map map;118,3101
-	shsl_error err;119,3116
-} shsl_obj;121,3140
-shsl_obj SHSL_NIL 123,3154
-shsl_obj* shsl_add_ref(128,3367
-void shsl_del_ref(134,3479
-void shsl_free_obj(144,3698
-shsl_obj* shsl_obj_copy(194,4580
-shsl_obj* shsl_obj_mkint(211,5334
-shsl_obj* shsl_obj_mkreal(217,5528
-shsl_obj* shsl_obj_mkstr(223,5722
-shsl_obj* shsl_obj_mksym(236,6020
-shsl_obj* shsl_obj_mkerr(248,6302
-shsl_obj* shsl_obj_mkcons(261,6632
-void shsl_cons_set_cdr(271,6942
-void shsl_cons_set_car(277,7140
-shsl_obj* shsl_obj_mkvec(284,7339
-void shsl_vec_expand(299,7728
-void shsl_vec_push(308,8023
-shsl_obj* shsl_vec_ref(322,8379
-void shsl_vec_set(329,8609
-shsl_obj* shsl_obj_mkmap_empty(341,8967
-void shsl_map_expand(354,9317
-ssize_t shsl_map_index(366,9654
-shsl_obj* shsl_map_get(375,9892
-void shsl_map_set(382,10108
-bool shsl_obj_eq(407,10697
-    SHSL_TOK_NIL 454,11918
-    SHSL_TOK_NIL = 0, SHSL_TOK_SYMBOL,454,11918
-    SHSL_TOK_INTEGER,455,11957
-    SHSL_TOK_INTEGER, SHSL_TOK_REAL,455,11957
-    SHSL_TOK_INTEGER, SHSL_TOK_REAL, SHSL_TOK_STRING,455,11957
-    SHSL_TOK_QUOTE,458,12034
-    SHSL_TOK_QUOTE, SHSL_TOK_QUASIQUOTE,458,12034
-    SHSL_TOK_QUOTE, SHSL_TOK_QUASIQUOTE, SHSL_TOK_COMMA,458,12034
-    SHSL_TOK_OPEN_PAREN,461,12111
-    SHSL_TOK_OPEN_PAREN, SHSL_TOK_CLOSE_PAREN,461,12111
-    SHSL_TOK_OPEN_SQUARE,462,12158
-    SHSL_TOK_OPEN_SQUARE, SHSL_TOK_CLOSE_SQUARE,462,12158
-    SHSL_TOK_OPEN_CURLY,463,12207
-    SHSL_TOK_OPEN_CURLY, SHSL_TOK_CLOSE_CURLY,463,12207
-    SHSL_TOK_EOF,467,12317
-    SHSL_TOK_ERROR,469,12348
-} SHSL_TOKEN_TYPE;470,12368
-    SHSL_TOKEN_TYPE type;473,12405
-    shsl_obj* obj;474,12431
-} shsl_token;475,12450
-    shsl_token token;477,12481
-    char* remaining;478,12503
-} lexer_pair;479,12524
-shsl_token empty_token(484,12666
-lexer_pair error_lexer_pair(493,12899
-bool is_special_char(505,13247
-bool is_symbol_char(513,13521
-bool try_parse_integer(520,13812
-char* slice_to_fresh_str(540,14197
-shsl_token parse_non_special_token(551,14593
-lexer_pair token_off(574,15115
-    shsl_obj* obj;662,17580
-    char* remaining;663,17599
-} parser_pair;664,17620
-parser_pair parse_off(671,17783
-parser_pair parse_until(768,20388
-    SHSL_EXPR_LITERAL,819,21800
-    SHSL_EXPR_MAP,820,21823
-    SHSL_EXPR_VECTOR,821,21842
-    SHSL_EXPR_LOOKUP,822,21864
-    SHSL_EXPR_IF,824,21888
-    SHSL_EXPR_LET,825,21906
-    SHSL_EXPR_WHILE,826,21925
-    SHSL_EXPR_DO,827,21946
-    SHSL_EXPR_DO_POKING,828,21964
-    SHSL_EXPR_DEF,830,21990
-    SHSL_EXPR_SET,831,22009
-    SHSL_EXPR_FN,833,22029
-    SHSL_EXPR_MACRO,834,22047
-    SHSL_EXPR_FUNCALL,836,22069
-} SHSL_EXPRESSION_TYPE;837,22092
-typedef struct if_expr 852,22628
-    struct shsl_expression* condition;853,22653
-    struct shsl_expression* then_part;854,22692
-    struct shsl_expression* else_part;855,22731
-} if_expr;856,22770
-typedef struct do_expr 858,22782
-    struct shsl_expression* body;859,22807
-    size_t body_length;860,22841
-} do_expr;861,22865
-typedef struct do_poking_expr 863,22877
-    struct shsl_expression* body;864,22909
-    size_t body_length;865,22943
-} do_poking_expr;866,22967
-typedef struct def_expr 868,22986
-    shsl_obj* name;869,23012
-    struct shsl_exppression* value;870,23060
-} def_expr;871,23096
-typedef struct set_expr{set_expr873,23109
-    shsl_obj* name;874,23134
-    struct shsl_exppression* value;875,23182
-} set_expr;876,23218
-typedef struct shsl_expression 878,23231
-    SHSL_EXPRESSION_TYPE type;879,23264
-	shsl_obj* literal;881,23307
-	shsl_obj* lookup_symbol;882,23327
-	shsl_obj* vec;883,23371
-	shsl_obj* map;884,23415
-	if_expr if_expr;886,23457
-	do_expr do_expr;887,23475
-	do_poking_expr do_poking_expr;888,23493
-	def_expr def_expr;889,23525
-	set_expr set_expr;890,23545
-} shsl_expression;892,23572
-bool shsl_is_nil(894,23592
-bool shsl_is_cons(898,23667
-bool shsl_is_err(902,23744
-bool shsl_is_list(906,23821
-bool shsl_is_well_formed_list(912,24012
-ssize_t shsl_list_length(926,24256
-#define return_error(940,24503
-shsl_obj* shsl_car(946,24636
-shsl_obj* shsl_cdr(957,24868
-shsl_obj* shsl_nthcdr(968,25100
-shsl_obj* shsl_nth(976,25311
-bool shsl_is_truthy(983,25522
-#define return_mallocd_expr(989,25741
-#define return_error_expr(996,25955
-bool shsl_expr_is_error(1004,26202
-shsl_expression* shsl_form_to_expr(1009,26340
-shsl_obj* shsl_eval(1110,29258
-void shsl_dbg_fputobj(1125,29668
-void shsl_dbg_fputtok(1158,30506
-int main(1214,31900
+shsl.h,6876
+#define SHSL_H9,380
+#define defstruct(20,529
+typedef enum SHSL_OBJECT_TYPE 27,743
+    SHSL_OBJ_NIL 30,844
+    SHSL_OBJ_NIL = 0, SHSL_OBJ_SYMBOL,30,844
+    SHSL_OBJ_INTEGER,31,884
+    SHSL_OBJ_INTEGER, SHSL_OBJ_REAL,31,884
+    SHSL_OBJ_INTEGER, SHSL_OBJ_REAL, SHSL_OBJ_STRING,31,884
+    SHSL_OBJ_CONS,34,958
+    SHSL_OBJ_CONS, SHSL_OBJ_MAP,34,958
+    SHSL_OBJ_CONS, SHSL_OBJ_MAP, SHSL_OBJ_VECTOR,34,958
+    SHSL_OBJ_BUILTIN_FUN,37,1037
+    SHSL_OBJ_BUILTIN_FUN, SHSL_OBJ_USER_FUN,37,1037
+    SHSL_OBJ_BUILTIN_MACRO,38,1083
+    SHSL_OBJ_BUILTIN_MACRO, SHSL_OBJ_USER_MACRO,38,1083
+    SHSL_OBJ_ERROR,41,1147
+} SHSL_OBJECT_TYPE;42,1167
+typedef enum SHSL_TOKEN_TYPE 129,4622
+    SHSL_TOK_NIL 131,4669
+    SHSL_TOK_NIL = 0, SHSL_TOK_SYMBOL,131,4669
+    SHSL_TOK_INTEGER,132,4708
+    SHSL_TOK_INTEGER, SHSL_TOK_REAL,132,4708
+    SHSL_TOK_INTEGER, SHSL_TOK_REAL, SHSL_TOK_STRING,132,4708
+    SHSL_TOK_QUOTE,135,4785
+    SHSL_TOK_QUOTE, SHSL_TOK_QUASIQUOTE,135,4785
+    SHSL_TOK_QUOTE, SHSL_TOK_QUASIQUOTE, SHSL_TOK_COMMA,135,4785
+    SHSL_TOK_OPEN_PAREN,138,4862
+    SHSL_TOK_OPEN_PAREN, SHSL_TOK_CLOSE_PAREN,138,4862
+    SHSL_TOK_OPEN_SQUARE,139,4909
+    SHSL_TOK_OPEN_SQUARE, SHSL_TOK_CLOSE_SQUARE,139,4909
+    SHSL_TOK_OPEN_CURLY,140,4958
+    SHSL_TOK_OPEN_CURLY, SHSL_TOK_CLOSE_CURLY,140,4958
+    SHSL_TOK_EOF,144,5068
+    SHSL_TOK_ERROR,146,5099
+} SHSL_TOKEN_TYPE;147,5119
+typedef enum SHSL_EXPRESSION_TYPE 200,7237
+    SHSL_EXPR_LITERAL,201,7273
+    SHSL_EXPR_MAP,202,7296
+    SHSL_EXPR_VECTOR,203,7315
+    SHSL_EXPR_LOOKUP,204,7337
+    SHSL_EXPR_IF,206,7361
+    SHSL_EXPR_LET,207,7379
+    SHSL_EXPR_WHILE,208,7398
+    SHSL_EXPR_DO,209,7419
+    SHSL_EXPR_DO_POKING,210,7437
+    SHSL_EXPR_DEF,212,7463
+    SHSL_EXPR_SET,213,7482
+    SHSL_EXPR_FN,215,7502
+    SHSL_EXPR_MACRO,216,7520
+    SHSL_EXPR_FUNCALL,218,7542
+} SHSL_EXPRESSION_TYPE;219,7565
+typedef struct shsl_sym 250,8731
+    shsl_obj* name;251,8757
+} shsl_sym 252,8795
+typedef struct shsl_error 253,8808
+    shsl_obj* msg;254,8836
+    shsl_obj* data;255,8873
+} shsl_error;256,8893
+typedef struct shsl_cons 257,8907
+    shsl_obj* car;258,8934
+    shsl_obj* cdr;259,8953
+} shsl_cons 260,8972
+typedef struct shsl_vec 261,8986
+    shsl_obj** buf;262,9012
+    size_t size;263,9032
+    size_t capacity;264,9049
+} shsl_vec;265,9070
+typedef struct shsl_kv 267,9132
+    shsl_obj* k;268,9157
+    shsl_obj* v;269,9174
+} shsl_kv;270,9191
+typedef struct shsl_map 271,9202
+    shsl_kv* buf;272,9228
+    size_t size;273,9246
+    size_t capacity;274,9263
+} shsl_map;275,9284
+typedef struct shsl_builtin_fun 276,9296
+    shsl_obj* env;277,9330
+    shsl_obj*(*apply)apply278,9398
+} shsl_builtin_fun;279,9455
+typedef struct shsl_user_fun 280,9475
+    shsl_obj* env;281,9506
+    shsl_obj* lambda_list;282,9574
+    shsl_expression* body;283,9631
+    size_t body_len;284,9658
+} shsl_user_fun;285,9679
+typedef struct shsl_obj 287,9697
+    int ref_count;289,9737
+    SHSL_OBJECT_TYPE type;290,9756
+	long i;294,9808
+	double r;295,9817
+	char* str;296,9828
+	shsl_sym sym;298,9841
+	shsl_cons cons;299,9856
+	shsl_vec vec;301,9874
+	shsl_map map;302,9889
+	shsl_builtin_fun builtin_fun;304,9905
+	shsl_user_fun user_fun;305,9936
+	shsl_builtin_fun builtin_macro;306,9961
+	shsl_user_fun user_macro;307,9994
+	shsl_error err;309,10022
+} shsl_obj;311,10046
+shsl_obj SHSL_NIL 313,10060
+#define return_mallocd_obj(328,10783
+shsl_obj* shsl_obj_mkint(334,10955
+shsl_obj* shsl_obj_mkreal(337,11066
+shsl_obj* shsl_obj_mkstr(343,11260
+shsl_obj* shsl_obj_mksym(355,11557
+shsl_obj* shsl_obj_mkerr(366,11837
+shsl_obj* shsl_obj_mkcons(378,12164
+shsl_obj* shsl_obj_mkvec(388,12472
+shsl_obj* shsl_obj_mkmap(403,12861
+shsl_obj* shsl_add_ref(419,13273
+void shsl_del_ref(424,13384
+void shsl_free_obj(433,13602
+shsl_obj* shsl_obj_copy(482,14483
+bool shsl_obj_eq(486,14573
+void shsl_cons_set_cdr(537,15995
+void shsl_cons_set_car(543,16193
+void shsl_vec_expand(551,16429
+void shsl_vec_push(560,16724
+shsl_obj* shsl_vec_get(574,17080
+void shsl_vec_set(581,17310
+void shsl_map_expand(594,17702
+ssize_t shsl_map_index(603,17989
+shsl_obj* shsl_map_get(611,18226
+void shsl_map_set(618,18442
+bool shsl_is_nil(644,19063
+bool shsl_is_cons(647,19137
+bool shsl_is_err(650,19213
+bool shsl_is_truthy(653,19289
+bool shsl_is_list(657,19404
+bool shsl_is_well_formed_list(662,19600
+#define return_error(678,19905
+#define return_error(684,20124
+shsl_obj* shsl_car(687,20202
+shsl_obj* shsl_cdr(697,20433
+shsl_obj* shsl_nthcdr(707,20664
+shsl_obj* shsl_nth(714,20874
+ssize_t shsl_list_length(720,21084
+typedef struct shsl_token 736,21436
+    SHSL_TOKEN_TYPE type;737,21464
+    shsl_obj* obj;738,21490
+} shsl_token;739,21509
+typedef struct lexer_pair 752,22245
+    shsl_token token;753,22273
+    char* remaining;754,22295
+} lexer_pair;755,22316
+lexer_pair token_off(759,22430
+shsl_token empty_token(848,25163
+lexer_pair error_lexer_pair(856,25391
+bool is_special_char(868,25739
+bool is_symbol_char(874,25910
+shsl_token parse_non_special_token(883,26330
+bool try_parse_integer(908,27044
+char* slice_to_fresh_str(927,27428
+typedef struct parser_pair 940,27764
+    shsl_obj* obj;941,27793
+    char* remaining;942,27812
+} parser_pair;943,27833
+parser_pair parse_off(944,27848
+parser_pair parse_until(1040,30452
+typedef struct if_expr 1104,32424
+    shsl_expression* condition;1105,32449
+    shsl_expression* then_part;1106,32481
+    shsl_expression* else_part;1107,32513
+} if_expr;1108,32545
+typedef struct do_expr 1109,32556
+    shsl_expression* body;1110,32581
+    size_t body_length;1111,32608
+} do_expr;1112,32632
+typedef struct do_poking_expr 1113,32643
+    shsl_expression* body;1114,32675
+    size_t body_length;1115,32702
+} do_poking_expr;1116,32726
+typedef struct def_expr 1117,32744
+    shsl_obj* name;1118,32770
+    shsl_expression* value;1119,32818
+} def_expr;1120,32846
+typedef struct set_expr 1121,32858
+    shsl_obj* name;1122,32884
+    shsl_expression* value;1123,32932
+} set_expr;1124,32960
+typedef struct shsl_expression 1125,32972
+    SHSL_EXPRESSION_TYPE type;1126,33005
+	shsl_obj* literal;1128,33048
+	shsl_obj* lookup_symbol;1129,33068
+	shsl_obj* vec;1130,33112
+	shsl_obj* map;1131,33156
+	if_expr if_expr;1133,33198
+	do_expr do_expr;1134,33216
+	do_poking_expr do_poking_expr;1135,33234
+	def_expr def_expr;1136,33266
+	set_expr set_expr;1137,33286
+} shsl_expression;1139,33313
+#define return_mallocd_expr(1143,33472
+#define return_error_expr(1151,33720
+#define return_error_expr(1160,34171
+shsl_expression* shsl_form_to_expr(1169,34578
+bool shsl_expr_is_error(1288,38278
+shsl_obj* shsl_eval(1294,38452
+shsl_obj* shsl_make_initial_frame(1308,38843
+shsl_obj* shsl_make_initial_env(1312,38922
+void shsl_dbg_fputtok(1318,39077
+void shsl_dbg_fputobj(1371,40423
+int main(1409,41400
