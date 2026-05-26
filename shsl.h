@@ -98,6 +98,9 @@ void shsl_free_obj(shsl_obj* obj);
 // fresh objects are initialized with an initial refcount of 0
 shsl_obj* shsl_obj_copy(shsl_obj* obj);
 bool shsl_obj_eq(shsl_obj* lhs, shsl_obj* rhs);
+// sets *dst to src whilst handling refcounting
+// (*dst is overwritten so loses a ref, src is what's written, so gains one)
+void shsl_set(shsl_obj** dst, shsl_obj* src);
 
 /// CONS MANIPULATIONS DECLARATIONS
 void shsl_cons_set_cdr(shsl_obj* cons_obj, shsl_obj* cdr);
@@ -116,6 +119,13 @@ ssize_t shsl_map_index(shsl_obj* map_obj, shsl_obj* key);
 shsl_obj* shsl_map_get(shsl_obj* map_obj, shsl_obj* key);
 void shsl_map_set(shsl_obj* map_obj,
                   shsl_obj* key, shsl_obj* new_val);
+
+/// COLLECTION BUILDERS DECLARATIONS
+typedef enum SHLS_CB_TYPE {SHSL_CB_LIST, SHSL_CB_VEC, SHSL_CB_MAP} SHSL_CB_TYPE;
+defstruct(shsl_cb);
+shsl_cb shsl_cb_make(SHSL_CB_TYPE type);
+void shsl_cb_add(shsl_cb* cb, shsl_obj* obj);
+void shsl_cb_get(shsl_cb* cb, shsl_obj* obj);
 
 /// DATA PREDICATES DECLARATIONS
 bool shsl_is_nil(const shsl_obj* obj);
@@ -602,6 +612,15 @@ bool shsl_obj_eq(shsl_obj* lhs, shsl_obj* rhs) {
     }
     assert(0 && "UNREACHABLE");
 }
+// dst = src
+// dst loses a ref
+// src gains a ref
+// only use when overwriting an old value, do not use for initializatin code 
+void shsl_set(shsl_obj** dst, shsl_obj* src) {
+    shsl_add_ref(src);
+    shsl_del_ref(*dst);
+    *dst = src;
+}
 
 /// CONS MANIPULATIONS DEFINITIONS
 void shsl_cons_set_cdr(shsl_obj* cons_obj, shsl_obj* cdr) {
@@ -711,6 +730,75 @@ void shsl_map_set(shsl_obj* map_obj, shsl_obj* key, shsl_obj* new_val) {
     }
 }
 
+/// COLLECTION BUILDERS DECLARATIONS
+typedef struct shsl_cb {
+    SHSL_CB_TYPE type;
+    union {
+        struct {
+            shsl_obj* first; shsl_obj* last;
+        } cons_builder;
+        struct {
+            shsl_obj* vec;
+        } vec_builder;
+        struct {
+            shsl_obj* map; shsl_obj* curr_key; bool reading_key;
+        } map_builder;
+    };
+} shsl_cb;
+shsl_cb shsl_cb_make(SHSL_CB_TYPE type) {
+    switch(type) {
+        case SHSL_CB_LIST:
+            return (shsl_cb) {
+                .type = SHSL_CB_LIST,
+                .cons_builder.first = &SHSL_NIL,
+                .cons_builder.last = &SHSL_NIL,
+            };
+        case SHSL_CB_VEC:
+            return (shsl_cb) {
+                .type = SHSL_CB_VEC,
+                .vec_builder.vec = shsl_obj_mkvec(1),
+            };
+        case SHSL_CB_MAP:
+            return (shsl_cb) {
+                .type = SHSL_CB_MAP,
+                .map_builder.map = shsl_obj_mkmap(1),
+            };
+        default:
+            assert(0 && "unreachable");
+    }
+}
+void shsl_cb_add(shsl_cb* cb, shsl_obj* obj) {
+    switch(cb->type) {
+        case SHSL_CB_LIST: 
+                if(cb->cons_builder.first->type == SHSL_OBJ_NIL) {
+                    cb->cons_builder.first = shsl_obj_mkcons(obj, &SHSL_NIL);
+                    cb->cons_builder.last = cb->cons_builder.first;
+                }
+                else { 
+                    shsl_cons_set_cdr
+                        (cb->cons_builder.last,
+                         shsl_obj_mkcons(obj, &SHSL_NIL));
+                    cb->cons_builder.last = cb->cons_builder.last->cons.cdr;
+                }
+                break;
+        case SHSL_CB_VEC: 
+            shsl_vec_push(cb->vec_builder.vec, obj);
+            break;
+        case SHSL_CB_MAP: 
+            if(cb->map_builder.reading_key) {
+                cb->map_builder.curr_key = obj;
+                cb->map_builder.reading_key = false;
+            }
+            else {
+                shsl_map_set
+                    (cb->map_builder.map,
+                     cb->map_builder.curr_key,
+                     obj);
+                cb->map_builder.reading_key = true;
+            }
+    }
+}
+
 /// DATA PREDICATES DEFINITIONS
 bool shsl_is_nil(const shsl_obj* obj) {
     return obj->type == SHSL_OBJ_NIL;
@@ -745,11 +833,9 @@ bool shsl_is_proper_list(const shsl_obj* list_obj) {
 	}
     }
 }
-
 bool shsl_is_vec(const shsl_obj* obj) {
     return obj->type == SHSL_OBJ_VECTOR;
 }
-
 bool shsl_is_map(const shsl_obj* obj) {
     return obj->type == SHSL_OBJ_MAP;
 }

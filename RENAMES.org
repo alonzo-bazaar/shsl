@@ -1,0 +1,63 @@
+* todo list
+
+** better names for things
+*** shsl prefix
+when you have the time for it we gotta do a couple mass renamings here
+(and make sure everything still compiles and runs as expected)
+
+- preface everything with ~shsl_~ :: we expose a bunch of symbols that don't honour the ~shsl_~ prefix, if we want this thing to work as a C library we gotta add the prefix to em for better namespacing
+- vector/vec/? :: make every variable named ...vector... into ...vec..., the code so far uses the first one half the time and the second one the other half, it's very inconsistent and very annoying, vec is shorter and still to the point, use that one
+
+*** better name "paths"
+I want all global names to be like ~shsl_<general thing>_<specific thing>~
+"all" within reason, shit like ~shsl_eval~ should probably stay ~shsl_eval~ even if ~shls_expr_eval~ would make more sense
+
+*** clearer conventions
+- which rules do we use for enum names?
+- which rules for enum elements?
+- which rules for type names?
+- where do we abbreviate? where do we not?
+write this down somewhere and have it be clear
+
+maybe like
+functins that are parallel to shsl functions just get called shsl_<that>
+this includes
+- mapget
+- mapset
+- maphas
+- vecget
+- vecset
+- veclen
+- cons(?)
+- car
+- cdr
+- list
+- isnil
+- iserr
+- et al.
+
+although cons would be a problem there
+maybe have
+shsl_mk...
+for making data
+but keep this convention for everything else
+
+** shsl_vm struct
+make a struct that contains all the state you currently throw around places
+environment, big globals used outside of shsl code (like nil and t, for instance) 
+like, I want to init this struct and have all user facing function that wrangle shsl shit to just accept this struct
+
+*** heap/gc/allocator substruct(?)
+expressions are normal C objects, we don't wanna those to be allocated with our allocator, they have a normal lifetime
+shsl objects on the other hand, pass the allocator to every function manipulating them, zig style
+
+maybe for later but it would be nice to ensure two VMs can exist at the same time, would make for some funky multithread potential
+
+** help system/self documentation
+also maybe for later
+it would be nice to have like, docstrings and shit
+- do I put them in the symbols?
+- do I put them somewhere else? if so, where?
+  - in the objects themselves (doesn't sound like a good idea)
+  - in the environment bindings? (gotta create a new struct for bindings then)
+  - or somewhere else entirely?
