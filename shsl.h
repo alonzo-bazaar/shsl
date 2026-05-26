@@ -125,7 +125,7 @@ typedef enum SHLS_CB_TYPE {SHSL_CB_LIST, SHSL_CB_VEC, SHSL_CB_MAP} SHSL_CB_TYPE;
 defstruct(shsl_cb);
 shsl_cb shsl_cb_make(SHSL_CB_TYPE type);
 void shsl_cb_add(shsl_cb* cb, shsl_obj* obj);
-void shsl_cb_get(shsl_cb* cb, shsl_obj* obj);
+shsl_obj* shsl_cb_get(shsl_cb);
 
 /// DATA PREDICATES DECLARATIONS
 bool shsl_is_nil(const shsl_obj* obj);
@@ -612,6 +612,23 @@ bool shsl_obj_eq(shsl_obj* lhs, shsl_obj* rhs) {
     }
     assert(0 && "UNREACHABLE");
 }
+
+// TODO: sprintf for return_error_fmt
+#ifdef SHSL_LOG_RETURN_ERROR
+#define return_error(data, msg) do{		\
+    fprintf(stderr, "[ERROR] "msg"\n");		\
+    return shsl_obj_mkerr(msg, data);		\
+    } while(0)
+
+#define return_error_fmt(data, msg, ...) do{		\
+    fprintf(stderr, "[ERROR] "msg"\n", __VA_ARGS__);	\
+    return shsl_obj_mkerr(msg, data);			\
+    } while(0)
+#else
+#define return_error(data, msg) return shsl_obj_mkerr(msg, data)
+#define return_error_fmt(data, msg, ...) return shsl_obj_mkerr(msg, data)
+#endif
+
 // dst = src
 // dst loses a ref
 // src gains a ref
@@ -798,6 +815,23 @@ void shsl_cb_add(shsl_cb* cb, shsl_obj* obj) {
             }
     }
 }
+shsl_obj* shsl_cb_get(shsl_cb cb) {
+    switch (cb.type) {
+        case SHSL_CB_LIST:
+            return cb.cons_builder.first;
+        case SHSL_CB_VEC:
+            return cb.vec_builder.vec;
+        case SHSL_CB_MAP:
+            if(cb.map_builder.reading_key)
+                return cb.map_builder.map;
+            else
+                return_error
+                    (cb.map_builder.map,
+                     "tried building map with with odd number of elements!");
+        default:
+            assert(0 && "unreachable");
+    }
+}
 
 /// DATA PREDICATES DEFINITIONS
 bool shsl_is_nil(const shsl_obj* obj) {
@@ -841,22 +875,6 @@ bool shsl_is_map(const shsl_obj* obj) {
 }
 
 /// LIST OPERATIONS DEFINITIONS
-#ifdef SHSL_LOG_RETURN_ERROR
-#define return_error(data, msg) do{		\
-    fprintf(stderr, "[ERROR] "msg"\n");		\
-    return shsl_obj_mkerr(msg, data);		\
-    } while(0)
-
-#define return_error_fmt(data, msg, ...) do{		\
-    fprintf(stderr, "[ERROR] "msg"\n", __VA_ARGS__);	\
-    return shsl_obj_mkerr(msg, data);			\
-    } while(0)
-#else
-// TODO: sprintf
-#define return_error(data, msg) return shsl_obj_mkerr(msg, data)
-#define return_error_fmt(data, msg, ...) return shsl_obj_mkerr(msg, data)
-#endif
-
 shsl_obj* shsl_car(shsl_obj* obj) {
     switch(obj->type) {
     case SHSL_OBJ_NIL:
