@@ -11,6 +11,7 @@
 #include<stdio.h>
 #include<stdlib.h>
 #include<stdbool.h>
+#include<stdarg.h>
 
 #include<ctype.h>
 #include<string.h>
@@ -24,29 +25,29 @@
 
 /// DATA TYPES DECLARATIONS
 // type tag for shsl objects
-typedef enum SHSL_OBJECT_TYPE {
+typedef enum SHSL_OBJ_TYPE {
     // atoms
     // nil first so an object initialized as {0} is nil
-    SHSL_OBJ_NIL = 0, SHSL_OBJ_SYM, 
-    SHSL_OBJ_INT, SHSL_OBJ_REAL, SHSL_OBJ_STRING,
+    SHSL_NIL = 0, SHSL_SYM, 
+    SHSL_INT, SHSL_REAL, SHSL_STRING,
 
     // collections
-    SHSL_OBJ_CONS, SHSL_OBJ_MAP, SHSL_OBJ_VEC,
+    SHSL_CONS, SHSL_VEC, SHSL_MAP,
 
     // functions and macros
-    SHSL_OBJ_BUILTIN_FUN, SHSL_OBJ_USER_FUN, 
-    SHSL_OBJ_BUILTIN_MACRO, SHSL_OBJ_USER_MACRO, 
+    SHSL_BUILTIN_FUN, SHSL_USER_FUN, 
+    SHSL_BUILTIN_MACRO, SHSL_USER_MACRO, 
 
     // error
-    SHSL_OBJ_ERROR,
-} SHSL_OBJECT_TYPE;
+    SHSL_ERR,
+} SHSL_OBJ_TYPE;
 
 // tagged union of all possible shsl objects
 defstruct(shsl_obj);
 // possible shsl objects
 // (outside of primitive types for which we just use the C ones)
 defstruct(shsl_sym);
-defstruct(shsl_error);
+defstruct(shsl_err);
 defstruct(shsl_cons);
 defstruct(shsl_vec);
 // key value pair (for maps)
@@ -63,24 +64,27 @@ defstruct(shsl_user_fun);
 /// DATA CONSTRUCTION DECLARATIONS
 // we handle everything through pointers because havnig everything
 // on the heap makes it easier to automatically manage
-shsl_obj* shsl_obj_mkint(long l);
-shsl_obj* shsl_obj_mkreal(double d);
-shsl_obj* shsl_obj_mkstr(const char* str);
-shsl_obj* shsl_obj_mksym(const char* name);
-shsl_obj* shsl_obj_mkerr(const char* msg, shsl_obj* data);
-shsl_obj* shsl_obj_mkcons(shsl_obj* car, shsl_obj* cdr);
-shsl_obj* shsl_obj_mkmap(size_t initial_capacity);
-shsl_obj* shsl_obj_mkvec(size_t initial_capacity);
-shsl_obj* shsl_obj_mkbuiltin_fun(shsl_obj* env,
-				 shsl_obj*(*apply)(shsl_obj* args));
-shsl_obj* shsl_obj_mkbuiltin_macro(shsl_obj* env,
-				   shsl_obj*(*expand)(shsl_obj* args));
+shsl_obj* shsl_mkint(long l);
+shsl_obj* shsl_mkreal(double d);
+shsl_obj* shsl_mkstr(const char* str);
+shsl_obj* shsl_mksym(const char* name);
+shsl_obj* shsl_mkerr(shsl_obj* data, const char* msg, ...);
+shsl_obj* shsl_vmkerr(shsl_obj* data, const char* msg, va_list args);
+    shsl_obj* shsl_mkcons(shsl_obj* car, shsl_obj* cdr);
+shsl_obj* shsl_mkmap(size_t initial_capacity);
+shsl_obj* shsl_mkvec(size_t initial_capacity);
+shsl_obj* shsl_mkbuiltin_fun(shsl_obj* env,
+			     shsl_obj*(*apply)(shsl_obj* args,
+					       shsl_obj* env));
+shsl_obj* shsl_mkbuiltin_macro(shsl_obj* env,
+			       shsl_obj*(*apply)(shsl_obj* args,
+						 shsl_obj* env));
 // this one bit is kinda ugly
-struct shsl_expression;
-shsl_obj* shsl_obj_mkuser_fun(shsl_obj* env, shsl_obj* lambda_list,
-			      struct shsl_expression* body, size_t body_len);
-shsl_obj* shsl_obj_mkuser_macro(shsl_obj* env, shsl_obj* lambda_list,
-				struct shsl_expression* body, size_t body_len);
+struct shsl_expr;
+shsl_obj* shsl_mkuser_fun(shsl_obj* env, shsl_obj* lambda_list,
+			  struct shsl_expr** body, size_t body_len);
+shsl_obj* shsl_mkuser_macro(shsl_obj* env, shsl_obj* lambda_list,
+			    struct shsl_expr** body, size_t body_len);
 
 /// DATA OPERATIONS DECLARATIONS
 /// GENERIC OPERATIONS DECLARATIONS (copy, delete, refcount shit)
@@ -92,33 +96,41 @@ shsl_obj* shsl_add_ref(shsl_obj* obj);
 void shsl_del_ref(shsl_obj* obj);
 // deletes the object and removes reference to any eventual sub-objects
 // (cons car and cdr, vector elements, map keys and values, et al.)
-void shsl_free_obj(shsl_obj* obj);
+void shsl_obj_free(shsl_obj* obj);
 // creates fresh (newly allocated) deep copy of obj
 // does not copy refcount tho
 // fresh objects are initialized with an initial refcount of 0
-shsl_obj* shsl_obj_copy(shsl_obj* obj);
-bool shsl_obj_eq(shsl_obj* lhs, shsl_obj* rhs);
+shsl_obj* shsl_copy(shsl_obj* obj);
+bool shsl_eq(shsl_obj* lhs, shsl_obj* rhs);
 // sets *dst to src whilst handling refcounting
 // (*dst is overwritten so loses a ref, src is what's written, so gains one)
 void shsl_set(shsl_obj** dst, shsl_obj* src);
 
 /// CONS MANIPULATIONS DECLARATIONS
-void shsl_cons_set_cdr(shsl_obj* cons_obj, shsl_obj* cdr);
-void shsl_cons_set_car(shsl_obj* cons_obj, shsl_obj* car);
+void shsl_set_car(shsl_obj* cons_obj, shsl_obj* car);
+void shsl_set_cdr(shsl_obj* cons_obj, shsl_obj* cdr);
 
 /// VECTOR MANIPULATIONS DECLARATIONS
 void shsl_vec_expand(shsl_obj* vec_obj, size_t new_size);
 void shsl_vec_push(shsl_obj* vec_obj, shsl_obj* obj);
 shsl_obj* shsl_vec_get(shsl_obj* vec_obj, size_t i);
 void shsl_vec_set(shsl_obj* vec_obj, size_t i, shsl_obj* new_val);
+size_t shsl_vec_length(shsl_obj* vec_obj);
+// bit of shit, but this avoids polluting the body with extra symbols
+// although it does introduce a bit of overhead, sorry :|
+#define shsl_vec_foreach(i, elt, vec)			\
+    for(size_t i = 0; i<shsl_vec_length(vec); ++i)	\
+	for(shsl_obj* elt = shsl_vec_get(vec, i);	\
+	    elt; elt = NULL)				\
 
 /// MAP MANIPULATIONS DECLARATIONS
 void shsl_map_expand(shsl_obj* map_obj, size_t new_size);
 // it's ssize_t instead of size_t so we can use -1 to say "hey, didn't find shit"
 ssize_t shsl_map_index(shsl_obj* map_obj, shsl_obj* key);
+
 shsl_obj* shsl_map_get(shsl_obj* map_obj, shsl_obj* key);
 void shsl_map_set(shsl_obj* map_obj,
-                  shsl_obj* key, shsl_obj* new_val);
+		  shsl_obj* key, shsl_obj* new_val);
 
 /// COLLECTION BUILDERS DECLARATIONS
 typedef enum SHLS_CB_TYPE {SHSL_CB_LIST, SHSL_CB_VEC, SHSL_CB_MAP} SHSL_CB_TYPE;
@@ -129,9 +141,14 @@ shsl_obj* shsl_cb_get(shsl_cb);
 
 /// DATA PREDICATES DECLARATIONS
 bool shsl_is_nil(const shsl_obj* obj);
-bool shsl_is_cons(const shsl_obj* obj);
+bool shsl_is_sym(const shsl_obj* obj);
+bool shsl_is_int(const shsl_obj* obj);
+bool shsl_is_real(const shsl_obj* obj);
+bool shsl_is_num(const shsl_obj* obj);
 bool shsl_is_err(const shsl_obj* obj);
 bool shsl_is_truthy(const shsl_obj* obj);
+
+bool shsl_is_cons(const shsl_obj* obj);
 bool shsl_is_list(const shsl_obj* obj);
 bool shsl_is_proper_list(const shsl_obj* list_obj);
 bool shsl_is_vec(const shsl_obj* obj);
@@ -143,7 +160,7 @@ shsl_obj* shsl_cdr(shsl_obj* obj);
 shsl_obj* shsl_nthcdr(shsl_obj* obj, size_t n);
 shsl_obj* shsl_nth(shsl_obj* list_obj, size_t n);
 // ssize_t so we can use -1 as "bro what the fuck is this object"
-ssize_t shsl_list_length(shsl_obj* list_obj);
+ssize_t shsl_list_len(shsl_obj* list_obj);
 
 
 //// LEXER DECLARATIONS
@@ -222,10 +239,10 @@ parser_pair parse_until(char* str,
 //// ----------------------------------------------------------------------------
 
 /// EXPRESSION TYPE DECLARATIONS
-typedef enum SHSL_EXPRESSION_TYPE {
+typedef enum SHSL_EXPR_TYPE {
     SHSL_EXPR_LITERAL,
-    SHSL_EXPR_MAP,
     SHSL_EXPR_VEC,
+    SHSL_EXPR_MAP,
     SHSL_EXPR_LOOKUP,
 	
     SHSL_EXPR_IF,
@@ -241,43 +258,46 @@ typedef enum SHSL_EXPRESSION_TYPE {
     SHSL_EXPR_MACRO,
 
     SHSL_EXPR_FUNCALL,
-} SHSL_EXPRESSION_TYPE;
-defstruct(if_expr);
-defstruct(do_expr);
-defstruct(do_poking_expr);
-defstruct(def_expr);
+} SHSL_EXPR_TYPE;
+defstruct(shsl_vec_expr);
+defstruct(shsl_map_expr);
+defstruct(shsl_if_expr);
+defstruct(shsl_do_expr);
+defstruct(shsl_do_poking_expr);
+defstruct(shsl_def_expr);
 defstruct(set_expr);
-defstruct(funcall_expr);
+defstruct(shsl_funcall_expr);
 // tagged union of all possible expression types
 // (either the ones above or like, literals and shit)
-defstruct(shsl_expression);
+defstruct(shsl_expr);
 
 /// FORM TRANSLATION FUNCTIONS DECLARATIONS
-shsl_expression* shsl_form_to_expr(shsl_obj* form);
-bool shsl_expr_is_error(shsl_expression* expr);
+shsl_expr* shsl_form_to_expr(shsl_obj* form);
+bool shsl_expr_is_error(shsl_expr* expr);
+// unrelated to form translation but still related to forms
+void shsl_expr_free(shsl_expr* expr);
 
 /// EVALUTATION FUNCTIONS DECLARATIONS
 // we don't have a separate shsl_environment type as the enviroment will be
 // represented using a cons list of shsl maps
 // this should make for easier debuggability, even from within shsl
 // and may allow for some funky pythonish introspection
-shsl_obj* shsl_eval(shsl_expression* form, shsl_obj* env);
-shsl_obj* shsl_eval_many_into_vec(shsl_expression** args, size_t args_len,
+shsl_obj* shsl_eval(shsl_expr* form, shsl_obj* env);
+shsl_obj* shsl_eval_many_into_vec(shsl_expr** args, size_t args_len,
 				  shsl_obj* env);
 
 /// BUILTIN FUNCTIONS DECLARATIONS
 // that is, definition of the functions that will be visible as builtins
 // for the shsl code
 /// SHSL ARITHMETIC FUNCTIONS DECLARATIONS
-shsl_obj* shsl_fun_add_all(shsl_obj* args);
-shsl_obj* shsl_fun_sub(shsl_obj* args);
-shsl_obj* shsl_fun_mul_all(shsl_obj* args);
-shsl_obj* shsl_fun_div(shsl_obj* args);
+shsl_obj* shsl_builtin_all(shsl_obj* args, shsl_obj* env);
+shsl_obj* shsl_builtin_sub(shsl_obj* args, shsl_obj* env);
+shsl_obj* shsl_builtin_mul(shsl_obj* args, shsl_obj* env);
+shsl_obj* shsl_builtin_div(shsl_obj* args, shsl_obj* env);
 
 /// ENVIRONMENT FUNCTIONS DECLARATIONS
 // both of these may well be global constants if c had map (and shsl list) literals
-shsl_obj* shsl_make_initial_frame();
-shsl_obj* shsl_make_initial_env();
+shsl_obj* shsl_make_initial_env(void);
 // lookup in an environment that's just a list of maps(lol)
 shsl_obj* shsl_env_lookup(shsl_obj* env, shsl_obj* key);
 
@@ -285,6 +305,10 @@ shsl_obj* shsl_env_lookup(shsl_obj* env, shsl_obj* key);
 //// ----------------------------------------------------------------------------
 void shsl_dbg_fputtok(const shsl_token* tok, FILE* restrict stream);
 void shsl_fputobj(const shsl_obj* obj, FILE* restrict stream);
+
+//// USER FACING FUNCTIONS DECLARATIONS
+//// ----------------------------------------------------------------------------
+shsl_obj* shsl_eval_str(char* c, shsl_obj* env);
 
 #ifdef SHSL_IMPLEMENTATION
 //// DATA DEFINITIONS
@@ -294,10 +318,10 @@ void shsl_fputobj(const shsl_obj* obj, FILE* restrict stream);
 typedef struct shsl_sym {
     shsl_obj* name; // must be string
 } shsl_sym ;
-typedef struct shsl_error {
-    shsl_obj* msg; // must be string
-    shsl_obj* data;
-} shsl_error;
+typedef struct shsl_err {
+    shsl_obj* data; // can be any
+    shsl_obj* msg;  // must be string
+} shsl_err;
 typedef struct shsl_cons {
     shsl_obj* car;
     shsl_obj* cdr;
@@ -318,20 +342,24 @@ typedef struct shsl_map {
     size_t capacity;
 } shsl_map;
 typedef struct shsl_builtin_fun {
-    shsl_obj* env;                     // must be cons list of maps
-    shsl_obj*(*apply)(shsl_obj* args); // must be vector
+    // env must be cons list of frames (maps)
+    // args must be a vector
+    shsl_obj* env;
+    shsl_obj*(*apply)(shsl_obj* args, shsl_obj* env);
 } shsl_builtin_fun;
 typedef struct shsl_user_fun {
-    shsl_obj* env;                     // must be cons list of maps
-    shsl_obj* lambda_list;             // must be vector
-    shsl_expression* body;
+    // env must be cons list of maps
+    // lambda_list be vector
+    shsl_obj* env;
+    shsl_obj* lambda_list;
+    shsl_expr** body;
     size_t body_len;
 } shsl_user_fun;
 
 typedef struct shsl_obj {
     // header
     int ref_count;
-    SHSL_OBJECT_TYPE type;
+    SHSL_OBJ_TYPE type;
 
     // data
     union {
@@ -350,18 +378,18 @@ typedef struct shsl_obj {
 	shsl_builtin_fun builtin_macro;
 	shsl_user_fun user_macro;
 
-	shsl_error err;
+	shsl_err err;
     };
 } shsl_obj;	
 
-shsl_obj SHSL_NIL = {0};
+shsl_obj SHSL_GLOBAL_NIL = {0};
 
 /// DATA CONSTRUCTION DEFINITIONS
-// the shsl_obj_mk* functions all return references to fresh objects
+// the shsl_mk* functions all return references to fresh objects
 // although those objects may contain references to pre-existing objects
 // if they're cons cells, vectors, or maps, for instance
 // 
-// all raw C data passed to an shsl_obj_mk* constructor
+// all raw C data passed to an shsl_mk* constructor
 // (numbers, chars, strings (both for shsl strings and symbol names))
 // is copied into the returned object,
 // so changes to the object won't change the original data and viceversa
@@ -375,178 +403,222 @@ shsl_obj SHSL_NIL = {0};
 	return obj;						\
     } while(0)
 
-shsl_obj* shsl_obj_mkint(long l) {
-    return_mallocd_obj(.ref_count = 0, .type = SHSL_OBJ_INT, .i = l);
+shsl_obj* shsl_mkint(long l) {
+    return_mallocd_obj(.ref_count = 0, .type = SHSL_INT, .i = l);
 }
-shsl_obj* shsl_obj_mkreal(double d) {
-    return_mallocd_obj(.ref_count = 0, .type = SHSL_OBJ_REAL, .r = d);
+shsl_obj* shsl_mkreal(double d) {
+    return_mallocd_obj(.ref_count = 0, .type = SHSL_REAL, .r = d);
 }
-shsl_obj* shsl_obj_mkstr(const char* str) {
-    char* c = (char*)malloc(strlen(str) * sizeof(char));
+shsl_obj* shsl_mkstr(const char* str) {
+    char* c = calloc(strlen(str), sizeof(char));
     strcpy(c, str);
-    return_mallocd_obj(.ref_count = 0, .type = SHSL_OBJ_STRING, .str = c);
+    return_mallocd_obj(.ref_count = 0, .type = SHSL_STRING, .str = c);
 }
-shsl_obj* shsl_obj_mksym(const char* name) {
+shsl_obj* shsl_mksym(const char* name) {
     return_mallocd_obj(.ref_count = 0,
-		       .type = SHSL_OBJ_SYM,
+		       .type = SHSL_SYM,
 		       .sym = (shsl_sym){
-			   .name = shsl_add_ref(shsl_obj_mkstr(name)),
+			   .name = shsl_add_ref(shsl_mkstr(name)),
 		       });
 }
-shsl_obj* shsl_obj_mkerr(const char* msg, shsl_obj* data) {
+
+#define SHSL_ERR_MAX_LENGTH 1024
+shsl_obj* shsl_vmkerr(shsl_obj* data, const char* msg, va_list args) {
+    static char buf[SHSL_ERR_MAX_LENGTH] = {0};
+    vsprintf(buf, msg, args);
+
+#ifdef SHSL_LOG_ERROR
+    fprintf(stderr, "[ERROR] %s\n", buf);
+    fprintf(stderr, "[ERROR] with data:");
+    shsl_fputobj(data, stderr);
+    fputc('\n', stderr);
+#endif
+
     return_mallocd_obj(.ref_count = 0,
-		       .type = SHSL_OBJ_ERROR,
-		       .err = (shsl_error) {
-			   .msg = shsl_add_ref(shsl_obj_mkstr(msg)),
+		       .type = SHSL_ERR,
+		       .err = (shsl_err) {
+			   .msg = shsl_add_ref(shsl_mkstr(buf)),
 			   .data = shsl_add_ref(data),
 		       });
 }
-shsl_obj* shsl_obj_mkcons(shsl_obj* car, shsl_obj* cdr) {
-    return_mallocd_obj(
-	.ref_count = 0,
-	.type = SHSL_OBJ_CONS,
-	.cons = (shsl_cons) { .car = shsl_add_ref(car),
-			      .cdr = shsl_add_ref(cdr), }
-    );
+shsl_obj* shsl_mkerr(shsl_obj* data, const char* msg, ...) {
+    va_list args;
+    va_start(args, msg);
+    shsl_obj* err = shsl_vmkerr(data, msg, args);
+    va_end(args);
+    return err;
 }
-shsl_obj* shsl_obj_mkvec(size_t initial_capacity) {
+
+shsl_obj* shsl_mkcons(shsl_obj* car, shsl_obj* cdr) {
+    return_mallocd_obj(.ref_count = 0,
+		       .type = SHSL_CONS,
+		       .cons = (shsl_cons) { .car = shsl_add_ref(car),
+					     .cdr = shsl_add_ref(cdr), }
+		      );
+}
+shsl_obj* shsl_mkvec(size_t initial_capacity) {
     assert(initial_capacity > 0);
 
-    return_mallocd_obj(
-	.ref_count = 0,
-	.type = SHSL_OBJ_VEC,
-	.vec = (shsl_vec) {
-	    .buf = (shsl_obj**) malloc(initial_capacity * sizeof(shsl_obj*)),
-	    .size = 0,
-	    .capacity = initial_capacity,
-	},
-    );
+    return_mallocd_obj(.ref_count = 0,
+		       .type = SHSL_VEC,
+		       .vec = (shsl_vec) {
+			   .buf = calloc(initial_capacity, sizeof(shsl_obj*)),
+			   .size = 0,
+			   .capacity = initial_capacity,
+		       },
+		      );
 }
-shsl_obj* shsl_obj_mkmap(size_t initial_capacity) {
+shsl_obj* shsl_mkmap(size_t initial_capacity) {
     assert(initial_capacity > 0);
-    return_mallocd_obj(
-	.ref_count = 0,
-	.type = SHSL_OBJ_MAP,
-	.map = (shsl_map){
-	    .buf = (shsl_kv*)malloc(initial_capacity * sizeof(shsl_kv)),
-	    .size = 0,
-	    .capacity = initial_capacity,
-	}
-    );
+    return_mallocd_obj(.ref_count = 0,
+		       .type = SHSL_MAP,
+		       .map = (shsl_map){
+			   .buf = calloc(initial_capacity, sizeof(shsl_kv)),
+			   .size = 0,
+			   .capacity = initial_capacity,
+		       }
+		      );
 }
-shsl_obj* shsl_obj_mkbuiltin_fun(shsl_obj* env, shsl_obj*(*apply)(shsl_obj* args)) {
-    assert(shsl_is_list(env) && "function env must be list!");
+shsl_obj* shsl_mkbuiltin_fun(shsl_obj* env,
+			     shsl_obj*(*apply)(shsl_obj* args,
+					       shsl_obj* env)) {
+    assert((!env)
+	   || shsl_is_nil(env)
+	   || shsl_is_cons(env) && shsl_is_map(env->cons.car)
+	   && "if function env is not null it must be a list of maps!");
 
-    return_mallocd_obj(
-	.ref_count = 0,
-	.type = SHSL_OBJ_BUILTIN_FUN,
-	.builtin_fun = (shsl_builtin_fun) {
-	    .env = env,
-	    .apply = apply,
-	}
-    );
+    return_mallocd_obj(.ref_count = 0,
+		       .type = SHSL_BUILTIN_FUN,
+		       .builtin_fun = (shsl_builtin_fun) {
+			   .env = env,
+			   .apply = apply,
+		       }
+		      );
 }
-shsl_obj* shsl_obj_mkbuiltin_macro(shsl_obj* env, shsl_obj*(*expand)(shsl_obj* args)) {
-    assert(shsl_is_list(env) && "macro env must be list!");
+shsl_obj* shsl_mkbuiltin_macro(shsl_obj* env,
+			       shsl_obj*(*expand)(shsl_obj* args,
+						  shsl_obj* env)) {
+    assert((!env)
+	   || shsl_is_nil(env)
+	   || shsl_is_cons(env) && shsl_is_map(env->cons.car)
+	   && "if macro env is not null it must be a list of maps!");
 
-    return_mallocd_obj(
-	.ref_count = 0,
-	.type = SHSL_OBJ_BUILTIN_MACRO,
-	.builtin_macro = (shsl_builtin_fun) {
-	    .env = env,
-	    .apply = expand,
-	}
-    );
+    return_mallocd_obj(.ref_count = 0,
+		       .type = SHSL_BUILTIN_MACRO,
+		       .builtin_macro = (shsl_builtin_fun) {
+			   .env = env,
+			   .apply = expand,
+		       }
+		      );
 }
-shsl_obj* shsl_obj_mkuser_fun(shsl_obj* env, shsl_obj* lambda_list,
-			      struct shsl_expression* body, size_t body_len) {
-    assert(shsl_is_list(env) && "function env must be list!");
-    assert(shsl_is_vec(lambda_list) && "function lambda list must be list!");
+shsl_obj* shsl_mkuser_fun(shsl_obj* env, shsl_obj* lambda_list,
+			  struct shsl_expr** body, size_t body_len) {
+    assert((!env)
+	   || shsl_is_nil(env)
+	   || shsl_is_cons(env) && shsl_is_map(env->cons.car)
+	   && "if function env is not null it must be a list of maps!");
+    assert(shsl_is_vec(lambda_list) && "function lambda list must be vector!");
     assert(body && "function body cannot be null pointer!");
     assert(body_len > 0 && "function body length cannot be null!");
 
-    return_mallocd_obj(
-	.ref_count = 0,
-	.type = SHSL_OBJ_USER_FUN,
-	.user_fun = (shsl_user_fun) {
-	    .env = env,
-	    .lambda_list = lambda_list,
-	    .body = body,
-	    .body_len = body_len,
-	}
-    );
+    return_mallocd_obj(.ref_count = 0,
+		       .type = SHSL_USER_FUN,
+		       .user_fun = (shsl_user_fun) {
+			   .env = env,
+			   .lambda_list = lambda_list,
+			   .body = body,
+			   .body_len = body_len,
+		       }
+		      );
 }
-shsl_obj* shsl_obj_mkuser_macro(shsl_obj* env, shsl_obj* lambda_list,
-				struct shsl_expression* body, size_t body_len) {
-    assert(shsl_is_list(env) && "macro env must be list!");
+shsl_obj* shsl_mkuser_macro(shsl_obj* env, shsl_obj* lambda_list,
+			    struct shsl_expr** body, size_t body_len) {
+    assert((!env)
+	   || shsl_is_nil(env)
+	   || shsl_is_cons(env) && shsl_is_map(env->cons.car)
+	   && "if function env is not null it must be a list of maps!");
     assert(shsl_is_vec(lambda_list) && "macro lambda list must be list!");
     assert(body && "macro body cannot be null pointer!");
     assert(body_len > 0 && "macro body length cannot be null!");
 
-    return_mallocd_obj(
-	.ref_count = 0,
-	.type = SHSL_OBJ_USER_MACRO,
-	.user_macro = (shsl_user_fun) {
-	    .env = env,
-	    .lambda_list = lambda_list,
-	    .body = body,
-	    .body_len = body_len,
-	}
-    );
+    return_mallocd_obj(.ref_count = 0,
+		       .type = SHSL_USER_MACRO,
+		       .user_macro = (shsl_user_fun) {
+			   .env = env,
+			   .lambda_list = lambda_list,
+			   .body = body,
+			   .body_len = body_len,
+		       }
+		      );
 }
 
 /// DATA OPERATIONS DEFINITIONS
 /// GENERIC OPERATIONS DEFINITIONS
 shsl_obj* shsl_add_ref(shsl_obj* obj) {
-    if(obj->type != SHSL_OBJ_NIL)
+#ifdef SHSL_LOG_ADD_REF
+    fprintf(stdout, "[SHSL GC]: adding ref to object %p\n", (void*)obj);
+    fprintf(stdout, "[SHSL GC]: "); shsl_fputobj(obj, stdout);
+    fprintf(stdout, "[SHSL GC]: was at refcount %d\n", obj->ref_count);
+    fputc('\n', stdout);
+#endif    
+
+    if(obj->type != SHSL_NIL)
 	obj->ref_count++;
     return obj;
 }
 void shsl_del_ref(shsl_obj* obj) {
-    if(obj->type != SHSL_OBJ_NIL) {
+#ifdef SHSL_LOG_ADD_REF
+    fprintf(stdout, "[SHSL GC]: adding ref to object %p\n", (void*)obj);
+    fprintf(stdout, "[SHSL GC]: "); shsl_fputobj(obj, stdout);
+    fprintf(stdout, "[SHSL GC]: was at refcount %d\n", obj->ref_count);
+#endif    
+
+    if(obj->type != SHSL_NIL) {
 	obj->ref_count--;
 	if(obj->ref_count == 0)
-	    shsl_free_obj(obj);
+	    shsl_obj_free(obj);
 	if(obj->ref_count < 0)
 	    fprintf(stderr, "now you fucked up!\n");
     }
 }
-void shsl_free_obj(shsl_obj *obj) {
+void shsl_obj_free(shsl_obj *obj) {
+#ifdef SHSL_LOG_GC
+    fprintf(stdout, "[SHSL GC]: freeing object %p\n", (void*)obj);
+    shsl_fputobj(obj, stdout);
+    fputc('\n', stdout);
+#endif    
     switch(obj->type) {
-    case SHSL_OBJ_NIL:
+    case SHSL_NIL:
 	fprintf(stderr, "cannot free NIL! You fucked something up!\n");
 	break;
 
-    case SHSL_OBJ_STRING:
+    case SHSL_STRING:
 	free(obj->str);
 	free(obj);
 	break;
 
-    case SHSL_OBJ_SYM:
+    case SHSL_SYM:
 	shsl_del_ref(obj->sym.name);
 	free(obj);
 	break;
 
-    case SHSL_OBJ_ERROR:
+    case SHSL_ERR:
 	shsl_del_ref(obj->err.msg);
 	shsl_del_ref(obj->err.data);
 	free(obj);
 	break;
-
-    case SHSL_OBJ_CONS:
+    case SHSL_CONS:
 	shsl_del_ref(obj->cons.car);
 	shsl_del_ref(obj->cons.cdr);
 	free(obj);
 	break;
-
-    case SHSL_OBJ_VEC:
+    case SHSL_VEC:
 	for(size_t i = 0; i<obj->vec.size; ++i)
 	    shsl_del_ref(obj->vec.buf[i]);
 	free(obj->vec.buf);
 	free(obj);
 	break;
-
-    case SHSL_OBJ_MAP:
+    case SHSL_MAP:
 	for(size_t i = 0; i<obj->map.size; ++i) {
 	    shsl_del_ref(obj->map.buf[i].k);
 	    shsl_del_ref(obj->map.buf[i].v);
@@ -555,80 +627,126 @@ void shsl_free_obj(shsl_obj *obj) {
 	free(obj);
 	break;
 
+    case SHSL_BUILTIN_FUN:
+	shsl_del_ref(obj->builtin_fun.env);
+	free(obj);
+	break;
+    case SHSL_USER_FUN:
+	shsl_del_ref(obj->user_fun.env);
+	shsl_obj_free(obj->user_fun.lambda_list);
+	for(size_t i = 0; i<obj->user_fun.body_len; ++i)
+	    shsl_expr_free(obj->user_fun.body[i]);
+	free(obj);
+	break;
+    case SHSL_BUILTIN_MACRO:
+	shsl_del_ref(obj->builtin_macro.env);
+	free(obj);
+	break;
+    case SHSL_USER_MACRO:
+	shsl_del_ref(obj->user_fun.env);
+	shsl_obj_free(obj->user_fun.lambda_list);
+	for(size_t i = 0; i<obj->user_fun.body_len; ++i)
+	    shsl_expr_free(obj->user_fun.body[i]);
+	free(obj);
+	break;
+
     default:
 	free(obj);
 	break;
     }
+
+#ifdef SHSL_LOG_GC
+    fprintf(stdout, "[SHSL GC]: freed object %p\n", (void*)obj);
+#endif    
 }
-shsl_obj* shsl_obj_copy(shsl_obj* obj) {
-    // TODO: create fresh copy
-    return obj;
+// all C string are copied by shsl_mk* constructors so there is no need to copy them
+// in this function, the constructors will do their thing for copying the data
+shsl_obj* shsl_copy(shsl_obj* obj) {
+    switch(obj->type) {
+    case SHSL_NIL:		return obj;
+    case SHSL_SYM:		return shsl_mksym(obj->sym.name->str);
+    case SHSL_INT:		return shsl_mkint(obj->i);
+    case SHSL_REAL:		return shsl_mkint(obj->r);
+    case SHSL_STRING:		return shsl_mkstr(obj->str);
+
+    case SHSL_ERR:		return shsl_mkerr(shsl_copy(obj->err.data),
+						  obj->err.msg->str);
+
+    case SHSL_CONS:	        return shsl_mkcons(shsl_copy(obj->cons.car),
+						   shsl_copy(obj->cons.cdr));
+						      
+    case SHSL_VEC: {
+	shsl_obj* copy = shsl_mkvec(obj->vec.size);
+	shsl_vec_foreach(i, elt, obj)
+	    shsl_vec_push(copy, shsl_copy(elt));
+	return copy;
+    }
+    case SHSL_MAP: {
+	shsl_obj* copy = shsl_mkmap(obj->map.size);
+	for(size_t i = 0; i<obj->map.size; ++i) {
+	    shsl_map_set(copy,
+			 shsl_copy(obj->map.buf[i].k),
+			 shsl_copy(obj->map.buf[i].v));
+	}
+	return copy;
+    }
+
+    case SHSL_BUILTIN_FUN:
+    case SHSL_USER_FUN:
+    case SHSL_BUILTIN_MACRO:
+    case SHSL_USER_MACRO:
+	fprintf(stderr, "[SHSL WARNING]: function object not copyable!\n");
+	return NULL;
+    }
 }
-bool shsl_obj_eq(shsl_obj* lhs, shsl_obj* rhs) {
+bool shsl_eq(shsl_obj* lhs, shsl_obj* rhs) {
     if(lhs->type != rhs->type)
 	return false;
 	
     switch(lhs->type) {
-    case SHSL_OBJ_NIL:
+    case SHSL_NIL:
 	return true;
-    case SHSL_OBJ_SYM:
+    case SHSL_SYM:
 	return strcmp(lhs->sym.name->str, rhs->sym.name->str) == 0;
-    case SHSL_OBJ_ERROR:
+    case SHSL_ERR:
 	return strcmp(lhs->err.msg->str, rhs->err.msg->str) == 0
-	    && shsl_obj_eq(lhs->err.data, lhs->err.data);
+	    && shsl_eq(lhs->err.data, lhs->err.data);
 
-    case SHSL_OBJ_INT:
+    case SHSL_INT:
 	return lhs->i == rhs->i;
-    case SHSL_OBJ_REAL:
+    case SHSL_REAL:
 	return lhs->r == rhs->r;
-    case SHSL_OBJ_STRING:
+    case SHSL_STRING:
 	return strcmp(lhs->str, rhs->str) == 0;
 
-    case SHSL_OBJ_CONS:
-	return shsl_obj_eq(lhs->cons.car, rhs->cons.car)
-	    && shsl_obj_eq(lhs->cons.cdr, rhs->cons.cdr);
+    case SHSL_CONS:
+	return shsl_eq(lhs->cons.car, rhs->cons.car)
+	    && shsl_eq(lhs->cons.cdr, rhs->cons.cdr);
 
-    case SHSL_OBJ_VEC:
+    case SHSL_VEC:
 	if(lhs->vec.size != rhs->vec.size)
 	    return false;
 	for(size_t i = 0; i<lhs->vec.size; ++i)
-	    if(!shsl_obj_eq(lhs->vec.buf[i], rhs->vec.buf[i]))
+	    if(!shsl_eq(lhs->vec.buf[i], rhs->vec.buf[i]))
 		return false;
 	return true;
 
-    case SHSL_OBJ_MAP:
+    case SHSL_MAP:
 	if(lhs->map.size != rhs->map.size)
 	    return false;
 	for(size_t i = 0; i<lhs->map.size; ++i)
-	    if(!shsl_obj_eq(shsl_map_get(lhs, lhs->map.buf[i].k),
-			    shsl_map_get(rhs, lhs->map.buf[i].k)))
+	    if(!shsl_eq(shsl_map_get(lhs, lhs->map.buf[i].k),
+			shsl_map_get(rhs, lhs->map.buf[i].k)))
 		return false;
 	return true;
-    case SHSL_OBJ_BUILTIN_FUN:
-    case SHSL_OBJ_USER_FUN:
-    case SHSL_OBJ_BUILTIN_MACRO:
-    case SHSL_OBJ_USER_MACRO:
+    case SHSL_BUILTIN_FUN:
+    case SHSL_USER_FUN:
+    case SHSL_BUILTIN_MACRO:
+    case SHSL_USER_MACRO:
 	fprintf(stderr, "TODO: this comparison's not implemeneted yet!\n");
 	return false;
     }
-    assert(0 && "UNREACHABLE");
 }
-
-// TODO: sprintf for return_error_fmt
-#ifdef SHSL_LOG_RETURN_ERROR
-#define return_error(data, msg) do{		\
-    fprintf(stderr, "[ERROR] "msg"\n");		\
-    return shsl_obj_mkerr(msg, data);		\
-    } while(0)
-
-#define return_error_fmt(data, msg, ...) do{		\
-    fprintf(stderr, "[ERROR] "msg"\n", __VA_ARGS__);	\
-    return shsl_obj_mkerr(msg, data);			\
-    } while(0)
-#else
-#define return_error(data, msg) return shsl_obj_mkerr(msg, data)
-#define return_error_fmt(data, msg, ...) return shsl_obj_mkerr(msg, data)
-#endif
 
 // dst = src
 // dst loses a ref
@@ -641,22 +759,18 @@ void shsl_set(shsl_obj** dst, shsl_obj* src) {
 }
 
 /// CONS MANIPULATIONS DEFINITIONS
-void shsl_cons_set_cdr(shsl_obj* cons_obj, shsl_obj* cdr) {
-    assert(cons_obj->type == SHSL_OBJ_CONS);
-    shsl_add_ref(cdr);
-    shsl_del_ref(cons_obj->cons.cdr);
-    cons_obj->cons.cdr = cdr;
+void shsl_set_car(shsl_obj* cons_obj, shsl_obj* new_car) {
+    assert(cons_obj->type == SHSL_CONS);
+    shsl_set(&(cons_obj->cons.car), new_car);
 }
-void shsl_cons_set_car(shsl_obj* cons_obj, shsl_obj* car) {
-    assert(cons_obj->type == SHSL_OBJ_CONS);
-    shsl_add_ref(car);
-    shsl_del_ref(cons_obj->cons.car);
-    cons_obj->cons.car = car;
+void shsl_set_cdr(shsl_obj* cons_obj, shsl_obj* new_cdr) {
+    assert(cons_obj->type == SHSL_CONS);
+    shsl_set(&(cons_obj->cons.cdr), new_cdr);
 }
 
 /// VECTOR MANIPULATIONS DEFINITIONS
 void shsl_vec_expand(shsl_obj* vec_obj, size_t new_size) {
-    assert(vec_obj->type == SHSL_OBJ_VEC);
+    assert(vec_obj->type == SHSL_VEC);
 
     if(vec_obj->vec.capacity >= new_size)
 	return;
@@ -665,7 +779,7 @@ void shsl_vec_expand(shsl_obj* vec_obj, size_t new_size) {
     vec_obj->vec.capacity = new_size;
 }
 void shsl_vec_push(shsl_obj* vec_obj, shsl_obj* obj) {
-    assert(vec_obj->type == SHSL_OBJ_VEC);
+    assert(vec_obj->type == SHSL_VEC);
 
     if(vec_obj->vec.size == vec_obj->vec.capacity)
 	shsl_vec_expand(vec_obj,
@@ -679,14 +793,14 @@ void shsl_vec_push(shsl_obj* vec_obj, shsl_obj* obj) {
     vec_obj->vec.size++;
 }
 shsl_obj* shsl_vec_get(shsl_obj* vec_obj, size_t i) {
-    assert(vec_obj->type == SHSL_OBJ_VEC);
+    assert(vec_obj->type == SHSL_VEC);
 
     if(i >= vec_obj->vec.size)
-	return shsl_obj_mkerr("out of bounds array read!", &SHSL_NIL);
+	return shsl_mkerr(&SHSL_GLOBAL_NIL, "out of bounds array read!");
     return vec_obj->vec.buf[i];
 }
 void shsl_vec_set(shsl_obj* vec_obj, size_t i, shsl_obj* new_val) {
-    assert(vec_obj->type == SHSL_OBJ_VEC);
+    assert(vec_obj->type == SHSL_VEC);
 
     // TODO: gestione degli errori un po' di più magari
     if(i >= vec_obj->vec.size)
@@ -696,10 +810,14 @@ void shsl_vec_set(shsl_obj* vec_obj, size_t i, shsl_obj* new_val) {
     shsl_del_ref(vec_obj->vec.buf[i]);
     vec_obj->vec.buf[i] = new_val;
 }
+size_t shsl_vec_length(shsl_obj* vec_obj) {
+    assert(vec_obj->type == SHSL_VEC);
+    return vec_obj->vec.size;
+}
 
 /// MAP MANIPULATIONS DEFINITIONS
 void shsl_map_expand(shsl_obj* map_obj, size_t new_size) {
-    assert(map_obj->type == SHSL_OBJ_MAP);
+    assert(map_obj->type == SHSL_MAP);
 
     if (map_obj->map.capacity >= new_size)
 	return;
@@ -708,22 +826,22 @@ void shsl_map_expand(shsl_obj* map_obj, size_t new_size) {
     map_obj->map.capacity = new_size;
 }
 ssize_t shsl_map_index(shsl_obj* map_obj, shsl_obj* key) {
-    assert(map_obj->type == SHSL_OBJ_MAP);
+    assert(map_obj->type == SHSL_MAP);
 
     for(size_t i = 0; i<map_obj->map.size; ++i)
-	if(shsl_obj_eq(key, map_obj->map.buf[i].k))
+	if(shsl_eq(key, map_obj->map.buf[i].k))
 	    return (ssize_t)i;
     return -1;
 }
 shsl_obj* shsl_map_get(shsl_obj* map_obj, shsl_obj* key) {
-    assert(map_obj->type == SHSL_OBJ_MAP);
+    assert(map_obj->type == SHSL_MAP);
 
     ssize_t i = shsl_map_index(map_obj, key);
     if(i>=0) return map_obj->map.buf[i].v;
-    return &SHSL_NIL;
+    return &SHSL_GLOBAL_NIL;
 }
 void shsl_map_set(shsl_obj* map_obj, shsl_obj* key, shsl_obj* new_val) {
-    assert(map_obj->type == SHSL_OBJ_MAP);
+    assert(map_obj->type == SHSL_MAP);
 
     ssize_t i = shsl_map_index(map_obj, key);
     if(i>=0) {
@@ -765,90 +883,97 @@ typedef struct shsl_cb {
 } shsl_cb;
 shsl_cb shsl_cb_make(SHSL_CB_TYPE type) {
     switch(type) {
-        case SHSL_CB_LIST:
-            return (shsl_cb) {
-                .type = SHSL_CB_LIST,
-                .cons_builder.first = &SHSL_NIL,
-                .cons_builder.last = &SHSL_NIL,
-            };
-        case SHSL_CB_VEC:
-            return (shsl_cb) {
-                .type = SHSL_CB_VEC,
-                .vec_builder.vec = shsl_obj_mkvec(1),
-            };
-        case SHSL_CB_MAP:
-            return (shsl_cb) {
-                .type = SHSL_CB_MAP,
-                .map_builder.map = shsl_obj_mkmap(1),
-                .map_builder.reading_key = true,
-                .map_builder.curr_key = nullptr,
-            };
-        default:
-            assert(0 && "unreachable");
+    case SHSL_CB_LIST:
+	return (shsl_cb) {
+	    .type = SHSL_CB_LIST,
+	    .cons_builder.first = &SHSL_GLOBAL_NIL,
+	    .cons_builder.last = &SHSL_GLOBAL_NIL,
+	};
+    case SHSL_CB_VEC:
+	return (shsl_cb) {
+	    .type = SHSL_CB_VEC,
+	    .vec_builder.vec = shsl_mkvec(1),
+	};
+    case SHSL_CB_MAP:
+	return (shsl_cb) {
+	    .type = SHSL_CB_MAP,
+	    .map_builder.map = shsl_mkmap(1),
+	    .map_builder.reading_key = true,
+	    .map_builder.curr_key = NULL,
+	};
     }
 }
 void shsl_cb_add(shsl_cb* cb, shsl_obj* obj) {
     switch(cb->type) {
-        case SHSL_CB_LIST: 
-                if(cb->cons_builder.first->type == SHSL_OBJ_NIL) {
-                    cb->cons_builder.first = shsl_obj_mkcons(obj, &SHSL_NIL);
-                    cb->cons_builder.last = cb->cons_builder.first;
-                }
-                else { 
-                    shsl_cons_set_cdr
-                        (cb->cons_builder.last,
-                         shsl_obj_mkcons(obj, &SHSL_NIL));
-                    cb->cons_builder.last = cb->cons_builder.last->cons.cdr;
-                }
-                break;
-        case SHSL_CB_VEC: 
-            shsl_vec_push(cb->vec_builder.vec, obj);
-            break;
-        case SHSL_CB_MAP: 
-            if(cb->map_builder.reading_key) {
-                cb->map_builder.curr_key = obj;
-                cb->map_builder.reading_key = false;
-            }
-            else {
-                shsl_map_set
-                    (cb->map_builder.map,
-                     cb->map_builder.curr_key,
-                     obj);
-                cb->map_builder.reading_key = true;
-            }
+    case SHSL_CB_LIST: 
+	if(cb->cons_builder.first->type == SHSL_NIL) {
+	    cb->cons_builder.first = shsl_mkcons(obj, &SHSL_GLOBAL_NIL);
+	    cb->cons_builder.last = cb->cons_builder.first;
+	}
+	else { 
+	    shsl_set_cdr
+		(cb->cons_builder.last,
+		 shsl_mkcons(obj, &SHSL_GLOBAL_NIL));
+	    cb->cons_builder.last = cb->cons_builder.last->cons.cdr;
+	}
+	break;
+    case SHSL_CB_VEC: 
+	shsl_vec_push(cb->vec_builder.vec, obj);
+	break;
+    case SHSL_CB_MAP: 
+	if(cb->map_builder.reading_key) {
+	    cb->map_builder.curr_key = obj;
+	    cb->map_builder.reading_key = false;
+	}
+	else {
+	    shsl_map_set
+		(cb->map_builder.map,
+		 cb->map_builder.curr_key,
+		 obj);
+	    cb->map_builder.reading_key = true;
+	}
     }
 }
 shsl_obj* shsl_cb_get(shsl_cb cb) {
     switch (cb.type) {
-        case SHSL_CB_LIST:
-            return cb.cons_builder.first;
-        case SHSL_CB_VEC:
-            return cb.vec_builder.vec;
-        case SHSL_CB_MAP:
-            if(cb.map_builder.reading_key)
-                return cb.map_builder.map;
-            else
-                return_error
-                    (cb.map_builder.map,
-                     "tried building map with with odd number of elements!");
-        default:
-            assert(0 && "unreachable");
+    case SHSL_CB_LIST:
+	return cb.cons_builder.first;
+    case SHSL_CB_VEC:
+	return cb.vec_builder.vec;
+    case SHSL_CB_MAP:
+	if(cb.map_builder.reading_key)
+	    return cb.map_builder.map;
+	else
+	    return shsl_mkerr (cb.map_builder.map,
+			       "tried building map with with odd number of elements!");
     }
 }
 
 /// DATA PREDICATES DEFINITIONS
 bool shsl_is_nil(const shsl_obj* obj) {
-    return obj->type == SHSL_OBJ_NIL;
+    return obj->type == SHSL_NIL;
 }
-bool shsl_is_cons(const shsl_obj* obj) {
-    return obj->type == SHSL_OBJ_CONS;
+bool shsl_is_sym(const shsl_obj* obj) {
+    return obj->type == SHSL_SYM;
+}
+bool shsl_is_int(const shsl_obj* obj) {
+    return obj->type == SHSL_INT;
+}
+bool shsl_is_real(const shsl_obj* obj) {
+    return obj->type == SHSL_REAL;
+}
+bool shsl_is_num(const shsl_obj* obj) {
+    return shsl_is_int(obj) || shsl_is_real(obj);
 }
 bool shsl_is_err(const shsl_obj* obj) {
-    return obj->type == SHSL_OBJ_ERROR;
+    return obj->type == SHSL_ERR;
 }
 bool shsl_is_truthy(const shsl_obj* obj) {
-    if(shsl_is_nil(obj) || shsl_is_err(obj)) return false;
-    return true;
+    return !(shsl_is_nil(obj) || shsl_is_err(obj));
+}
+
+bool shsl_is_cons(const shsl_obj* obj) {
+    return obj->type == SHSL_CONS;
 }
 bool shsl_is_list(const shsl_obj* obj) {
     return shsl_is_nil(obj) || shsl_is_cons(obj);
@@ -860,9 +985,9 @@ bool shsl_is_list(const shsl_obj* obj) {
 bool shsl_is_proper_list(const shsl_obj* list_obj) {
     while(true) {
 	switch(list_obj->type) {
-	case SHSL_OBJ_NIL:
+	case SHSL_NIL:
 	    return true;
-	case SHSL_OBJ_CONS:
+	case SHSL_CONS:
 	    list_obj = list_obj->cons.cdr;
 	    break;
 	default:
@@ -871,52 +996,52 @@ bool shsl_is_proper_list(const shsl_obj* list_obj) {
     }
 }
 bool shsl_is_vec(const shsl_obj* obj) {
-    return obj->type == SHSL_OBJ_VEC;
+    return obj->type == SHSL_VEC;
 }
 bool shsl_is_map(const shsl_obj* obj) {
-    return obj->type == SHSL_OBJ_MAP;
+    return obj->type == SHSL_MAP;
 }
 
 /// LIST OPERATIONS DEFINITIONS
 shsl_obj* shsl_car(shsl_obj* obj) {
     switch(obj->type) {
-    case SHSL_OBJ_NIL:
-	return &SHSL_NIL;
-    case SHSL_OBJ_CONS:
+    case SHSL_NIL:
+	return &SHSL_GLOBAL_NIL;
+    case SHSL_CONS:
 	return obj->cons.car;
     default:
-	return_error(obj, "CAR: cannot get car as object is not a list");
+	return shsl_mkerr(obj, "CAR: cannot get car as object is not a list");
     }
 }
 shsl_obj* shsl_cdr(shsl_obj* obj) {
     switch(obj->type) {
-    case SHSL_OBJ_NIL:
-	return &SHSL_NIL;
-    case SHSL_OBJ_CONS:
+    case SHSL_NIL:
+	return &SHSL_GLOBAL_NIL;
+    case SHSL_CONS:
 	return obj->cons.cdr;
     default:
-	return_error(obj, "CDR: cannot get car as object is not a list");
+	return shsl_mkerr(obj, "CDR: cannot get car as object is not a list");
     }
 }
 shsl_obj* shsl_nthcdr(shsl_obj* obj, size_t n) {
     while(n-- && !shsl_is_err(obj))
 	obj = shsl_cdr(obj);
     if(shsl_is_err(obj))
-	return_error(obj, "NTHCDR: cannot get nthcdr of list :(");
+	return shsl_mkerr(obj, "NTHCDR: cannot get nthcdr of list :(");
     return obj;
 }
 shsl_obj* shsl_nth(shsl_obj* list_obj, size_t n) {
     shsl_obj* nth = shsl_car(shsl_nthcdr(list_obj, n));
     if(shsl_is_err(nth))
-	return_error(nth, "NTH: can't get nth element of object");
+	return shsl_mkerr(nth, "NTH: can't get nth element of object");
     return nth;
 }
 ssize_t shsl_list_length(shsl_obj* list_obj) {
     for(ssize_t i = 0; ; ++i) {
 	switch(list_obj->type) {
-	case SHSL_OBJ_NIL:
+	case SHSL_NIL:
 	    return i;
-	case SHSL_OBJ_CONS:
+	case SHSL_CONS:
 	    list_obj = list_obj->cons.cdr;
 	    break;
 	default:
@@ -961,7 +1086,7 @@ lexer_pair token_off(char* str) {
     if(*str == '\0')
 	return (lexer_pair) {
 	    .token = empty_token(SHSL_TOK_EOF),
-	    .remaining = nullptr,
+	    .remaining = NULL,
 	};
 
     // skip whitespace
@@ -1012,13 +1137,13 @@ lexer_pair token_off(char* str) {
 	else {
 	    size_t len = (c-str);
 	    // remove beginning and ending '"' and add null terminator
-	    char* s = (char*)malloc(len * sizeof(char));
+	    char* s = calloc(len, sizeof(char));
 	    memcpy(s, str+1, len);
 	    s[len-1] = '\0';
 	    return (lexer_pair) {
 		.token = (shsl_token) {
 		    .type = SHSL_TOK_STRING,
-		    .obj = shsl_obj_mkstr(s),
+		    .obj = shsl_mkstr(s),
 		},
 		.remaining = c+1, // skip final delimiting '"'
 	    };
@@ -1042,7 +1167,7 @@ lexer_pair token_off(char* str) {
 shsl_token empty_token(SHSL_TOKEN_TYPE token_type) {
     return (shsl_token) {
 	.type = token_type,
-	.obj = &SHSL_NIL,
+	.obj = &SHSL_GLOBAL_NIL,
     };
 }
 // since we return errors as special token pairs, might as well have an
@@ -1051,9 +1176,9 @@ lexer_pair error_lexer_pair(const char* errmsg) {
     return (lexer_pair) {
 	.token = (shsl_token) {
 	    .type = SHSL_TOK_ERROR,
-	    .obj = shsl_obj_mkstr(errmsg),
+	    .obj = shsl_mkstr(errmsg),
 	},
-	.remaining = nullptr,
+	.remaining = NULL,
     };
 }
 
@@ -1079,19 +1204,19 @@ shsl_token parse_non_special_token(char*c, size_t len) {
     if (try_parse_integer(c, len, &l))
 	return (shsl_token) {
 	    .type = SHSL_TOK_INTEGER,
-	    .obj = shsl_obj_mkint(l),
+	    .obj = shsl_mkint(l),
 	};
 
     if (len == 3 && c[0] == 'n' && c[1] == 'i' && c[2] == 'l')
 	return (shsl_token) {
 	    .type = SHSL_TOK_NIL,
-	    .obj = &SHSL_NIL,
+	    .obj = &SHSL_GLOBAL_NIL,
 	};
 	
     char* newstr = slice_to_fresh_str(c, len);
     shsl_token t =  (shsl_token) {
 	.type = SHSL_TOK_SYMBOL,
-	.obj = shsl_obj_mksym(newstr),
+	.obj = shsl_mksym(newstr),
     };
     free(newstr);
     return t;
@@ -1124,7 +1249,7 @@ bool try_parse_integer(char* c, size_t len, long* into) {
 }
 // copy characters from c to c+len into a fresh null terminated string
 char* slice_to_fresh_str(const char* c, size_t len) {
-    char* fresh = (char*)malloc(len+1);
+    char* fresh = calloc(len+1, sizeof(char));
     memcpy(fresh, c, len);
     fresh[len] = '\0';
     return fresh;
@@ -1180,24 +1305,24 @@ parser_pair parse_off(char* str) {
     case SHSL_TOK_QUOTE: {
 	parser_pair pp = parse_off(lp.remaining);
 	return (parser_pair) {
-	    .obj = shsl_obj_mkcons(shsl_obj_mksym("quote"),
-				   shsl_obj_mkcons(pp.obj, &SHSL_NIL)),
+	    .obj = shsl_mkcons(shsl_mksym("quote"),
+			       shsl_mkcons(pp.obj, &SHSL_GLOBAL_NIL)),
 	    .remaining = pp.remaining,
 	};
     }
     case  SHSL_TOK_QUASIQUOTE: {
 	parser_pair pp = parse_off(lp.remaining);
 	return (parser_pair) {
-	    .obj = shsl_obj_mkcons(shsl_obj_mksym("quasiquote"),
-				   shsl_obj_mkcons(pp.obj, &SHSL_NIL)),
+	    .obj = shsl_mkcons(shsl_mksym("quasiquote"),
+			       shsl_mkcons(pp.obj, &SHSL_GLOBAL_NIL)),
 	    .remaining = pp.remaining,
 	};
     }
     case  SHSL_TOK_COMMA: {
 	parser_pair pp = parse_off(lp.remaining);
 	return (parser_pair) {
-	    .obj = shsl_obj_mkcons(shsl_obj_mksym("comma"),
-				   shsl_obj_mkcons(pp.obj, &SHSL_NIL)),
+	    .obj = shsl_mkcons(shsl_mksym("comma"),
+			       shsl_mkcons(pp.obj, &SHSL_GLOBAL_NIL)),
 	    .remaining = pp.remaining,
 	};
     }
@@ -1222,7 +1347,6 @@ parser_pair parse_off(char* str) {
     case SHSL_TOK_EOF:
 	return (parser_pair){0};
     }
-    assert(0 && "unreachable");
 }
 parser_pair parse_until(char* str,
 			shsl_cb cb,
@@ -1277,160 +1401,223 @@ parser_pair parse_until(char* str,
 // 
 // expressions do own their subexpressions tho
 // when deleting an expression, delete its subexpressions as well
-typedef struct if_expr {
-    shsl_expression* condition;
-    shsl_expression* then_part;
-    shsl_expression* else_part;
-} if_expr;
-typedef struct do_expr {
-    shsl_expression* body;
+typedef struct shsl_vec_expr {
+    shsl_expr** elts;
+    size_t size;
+} shsl_vec_expr;
+typedef struct shsl_map_expr {
+    shsl_expr** keys;
+    shsl_expr** vals;
+    size_t size;
+} shsl_map_expr;
+typedef struct shsl_if_expr {
+    shsl_expr* condition;
+    shsl_expr* then_part;
+    shsl_expr* else_part;
+} shsl_if_expr;
+typedef struct shsl_do_expr {
+    shsl_expr* body;
     size_t body_length;
-} do_expr;
-typedef struct do_poking_expr {
-    shsl_expression* body;
+} shsl_do_expr;
+typedef struct shsl_do_poking_expr {
+    shsl_expr* body;
     size_t body_length;
-} do_poking_expr;
-typedef struct def_expr {
+} shsl_do_poking_expr;
+typedef struct shsl_def_expr {
     shsl_obj* name;           // must be symbol
-    shsl_expression* value;
-} def_expr;
+    shsl_expr* value;
+} shsl_def_expr;
 typedef struct set_expr {
     shsl_obj* name;           // must be symbol
-    shsl_expression* value;
+    shsl_expr* value;
 } set_expr;
-typedef struct funcall_expr {
-    shsl_expression* fun_expr;
-    shsl_expression** args_exprs;
+typedef struct shsl_funcall_expr {
+    shsl_expr* fun_expr;
+    shsl_expr** args_exprs;
     size_t args_len;
-} funcall_expr;
-typedef struct shsl_expression {
-    SHSL_EXPRESSION_TYPE type;
+} shsl_funcall_expr;
+typedef struct shsl_expr {
+    SHSL_EXPR_TYPE type;
     union {
 	shsl_obj* literal;
 	shsl_obj* lookup_symbol; // must be symbol
-	shsl_obj* vec;           // must be vector
-	shsl_obj* map;           // must be map
 
-	if_expr if_expr;
-	do_expr do_expr;
-	do_poking_expr do_poking_expr;
-	def_expr def_expr;
+	shsl_vec_expr vec_expr;
+	shsl_map_expr map_expr;
+
+	shsl_if_expr if_expr;
+	shsl_do_expr do_expr;
+	shsl_do_poking_expr do_poking_expr;
+	shsl_def_expr def_expr;
 	set_expr set_expr;
-	funcall_expr funcall_expr;
+	shsl_funcall_expr funcall_expr;
     };
-} shsl_expression;
+} shsl_expr;
 
 /// EXPRESSION FUNCTION DEFINITIONS
 // https://stackoverflow.com/questions/6750512/gcc-warning-iso-c-does-not-permit-named-variadic-macros
-#define return_mallocd_expr(...) do {				\
-	shsl_expression* expr =					\
-	    (shsl_expression*)malloc(sizeof(shsl_expression));	\
-	*expr = (shsl_expression){__VA_ARGS__};			\
-	return expr;						\
+#define return_mallocd_expr(...) do {			\
+	shsl_expr* expr =				\
+	    (shsl_expr*)malloc(sizeof(shsl_expr));	\
+	*expr = (shsl_expr){__VA_ARGS__};		\
+	return expr;					\
     } while(0)
-#ifdef SHSL_LOG_RETURN_ERROR_EXPR
-#define return_error_expr(form, msg, ...) do{                           \
-	fprintf(stderr, "[ERROR] WHILE PARSING: "msg"\n"/*, __VA_ARGS__ */); \
-	return &(shsl_expression) {                                     \
-	    .type = SHSL_EXPR_LITERAL,                                  \
-	    .literal = shsl_obj_mkerr(msg, form),                       \
-	};                                                              \
-    }while(0)
-#else
-// TODO, sprintf
-#define return_error_expr(form, msg, ...) do{                           \
-	return &(shsl_expression) {                                     \
-	    .type = SHSL_EXPR_LITERAL,                                  \
-	    .literal = shsl_obj_mkerr(msg, form),                       \
-	};                                                              \
-    }while(0)
+shsl_expr* shsl_error_expr(shsl_obj* form, const char* msg, ...) {
+    va_list args;
+    va_start(args, msg);
+    shsl_obj* err = shsl_vmkerr(form, msg, args);
+    va_end(args);
+#ifdef SHSL_LOG_ERROR_EXPR
+    fprintf(stderr, "[EXPRESSION PARSING ERROR]: %s\n", err->msg);
 #endif
+    return_mallocd_expr(.type = SHSL_EXPR_LITERAL,
+			.literal = err);
+}
 
 /// FORM TRANSLATION FUNCTIONS DEFINITIONS
 // TODO: when returning an error we should free any temporary forms we allocated
 // and didn't use in the returned error
 // TODO: we need a function to free expression objects
-shsl_expression* shsl_form_to_expr(shsl_obj* form) {
+shsl_expr* shsl_form_to_expr(shsl_obj* form) {
     switch(form->type) {
-    case SHSL_OBJ_INT:
-    case SHSL_OBJ_REAL:
-    case SHSL_OBJ_STRING:
-    case SHSL_OBJ_NIL:
+    case SHSL_INT:
+    case SHSL_REAL:
+    case SHSL_STRING:
+    case SHSL_NIL:
 	return_mallocd_expr(.type = SHSL_EXPR_LITERAL,
 			    .literal = shsl_add_ref(form));
 
-    case SHSL_OBJ_SYM:
+    case SHSL_SYM:
 	return_mallocd_expr(.type = SHSL_EXPR_LOOKUP,
 			    .lookup_symbol = shsl_add_ref(form));
 
-    case SHSL_OBJ_VEC:
+    case SHSL_VEC: {
+	shsl_expr** elt_exprs = calloc(form->vec.size, sizeof(shsl_expr*));
+
+	shsl_vec_foreach(i, form_elt, form) {
+	    shsl_expr* next = shsl_form_to_expr(form_elt);
+	    if(!shsl_expr_is_error(next)) {
+		elt_exprs[i] = next;
+	    }
+	    else {
+		for(size_t j = 0; j<i; ++j)
+		    shsl_expr_free(elt_exprs[j]);
+		free(elt_exprs);
+		return shsl_error_expr(form,
+				       "cannot parse vector because item at position "
+				       "%zu of vector was malformed!", i);
+	    }
+	}
+
 	return_mallocd_expr(.type = SHSL_EXPR_VEC,
-			    .vec = shsl_add_ref(form));
+			    .vec_expr = (shsl_vec_expr) {
+				.elts = elt_exprs,
+				.size = shsl_vec_length(form),
+			    });
+    }
 
-    case SHSL_OBJ_MAP:
+    case SHSL_MAP: {
+	shsl_expr** key_exprs = calloc(form->map.size, sizeof(shsl_expr*));
+	shsl_expr** val_exprs = calloc(form->map.size, sizeof(shsl_expr*));
+
+	for(size_t i = 0; i<form->map.size; ++i) {
+	    shsl_expr* next_key = shsl_form_to_expr(form->map.buf[i].k);
+	    shsl_expr* next_val = shsl_form_to_expr(form->map.buf[i].v);
+
+	    if(!(shsl_expr_is_error(next_key) || shsl_expr_is_error(next_val))) {
+		key_exprs[i] = next_key;
+		val_exprs[i] = next_val;
+	    }
+	    else {
+		for(size_t j = 0; j<i; ++j) {
+		    shsl_expr_free(key_exprs[j]);
+		    shsl_expr_free(val_exprs[j]);
+		}
+		free(key_exprs);
+		free(val_exprs);
+		if(shsl_expr_is_error(next_key))
+		    return shsl_error_expr
+			(next_key->literal,
+			 "cannot parse map literal because key at position "
+			 "%zu of literal was malformed!", i);
+		else
+		    return shsl_error_expr
+			(next_val->literal,
+			 "cannot parse map literal because value at position "
+			 "%zu of literal was malformed!", i);
+	    }
+	}
+
 	return_mallocd_expr(.type = SHSL_EXPR_MAP,
-			    .map = shsl_add_ref(form));
+			    .map_expr = (shsl_map_expr) {
+				.keys = key_exprs,
+				.vals = val_exprs,
+				.size = form->map.size,
+			    });
+    }
 
-    case SHSL_OBJ_ERROR:
-	return_error_expr
+    case SHSL_ERR:
+	return shsl_error_expr
             (form, "an error object was passed to the parser");
 
-    case SHSL_OBJ_CONS: {
+    case SHSL_CONS: {
 	if(!shsl_is_proper_list(form))
-	    return_error_expr
-		(form, "not well formed list, cannot parse into expression");
+	    return shsl_error_expr
+		(form,
+		 "not well formed list, cannot parse into expression");
 
 	size_t form_length = (size_t)shsl_list_length(form);
 
-	if(form->cons.car->type == SHSL_OBJ_SYM) {
+	if(form->cons.car->type == SHSL_SYM) {
 	    char* s = form->cons.car->sym.name->str;
 	    if(strcmp(s, "quote") == 0) {
 		if(form_length != 2)
-		    return_error_expr
+		    return
+			shsl_error_expr
 			(form,
                          "malformed quote form, length of quote form must be "
 			 "exactly 2, just the 'quote symbol and the quoted "
 			 "datum");
 		shsl_obj* literal = shsl_nth(form, 1);
 		if(shsl_is_err(literal))
-		    return_error_expr
+		    return shsl_error_expr
                         (literal,
                          "cannot parse quote expression because"
                          "literal in quote was malformed");
 		return_mallocd_expr(.type = SHSL_EXPR_LITERAL,
-				    .literal = literal); 
+				    .literal = shsl_add_ref(literal)); 
 	    }
 
 	    else if(strcmp(s, "if") == 0) {
 		if(form_length < 3)
-		    return_error_expr
+		    return shsl_error_expr
                         (form, "malformed if statement, too short");
 		if(form_length > 4)
-		    return_error_expr
+		    return shsl_error_expr
                         (form, "malformed if statement, too long");
 				
                 // error expressions store the error value in the literal
                 // field of their union
                 // TODO: find a way to return propagating parser errors
                 // that doesn't expose this detail this hard :( 
-		shsl_expression* c = shsl_form_to_expr(shsl_nth(form, 1));
+		shsl_expr* c = shsl_form_to_expr(shsl_nth(form, 1));
 		if(shsl_expr_is_error(c))
-		    return_error_expr
+		    return shsl_error_expr
 			(c->literal,
                          "cannot parse if form, malformed conditional!");
-		shsl_expression* t = shsl_form_to_expr(shsl_nth(form, 2));
+		shsl_expr* t = shsl_form_to_expr(shsl_nth(form, 2));
 		if(shsl_expr_is_error(t))
-		    return_error_expr
+		    return shsl_error_expr
 			(t->literal,
                          "cannot parse if form, malformed then part!");
-		shsl_expression* e = shsl_form_to_expr(shsl_nth(form, 3));
+		shsl_expr* e = shsl_form_to_expr(shsl_nth(form, 3));
 		if(shsl_expr_is_error(e))
-		    return_error_expr
+		    return shsl_error_expr
 			(e->literal,
                          "cannot parse if form, malformed else part!");
 
 		return_mallocd_expr(.type = SHSL_EXPR_IF,
-				    .if_expr = (if_expr) {
+				    .if_expr = (shsl_if_expr) {
 					.condition = c,
 					.then_part = t,
 					.else_part = e
@@ -1447,14 +1634,13 @@ shsl_expression* shsl_form_to_expr(shsl_obj* form) {
 		assert(0 && "TODO: DEF");
 	}
 
-	shsl_expression* fun_expr = shsl_form_to_expr(form->cons.car);
-	shsl_expression** args_exprs =
-	    (shsl_expression**)malloc(form_length*sizeof(shsl_expression*));
+	shsl_expr* fun_expr = shsl_form_to_expr(form->cons.car);
+	shsl_expr** args_exprs = calloc(form_length, sizeof(shsl_expr*));
 	for(size_t i = 0; i<form_length-1; ++i) {
 	    args_exprs[i] = shsl_form_to_expr(shsl_nth(form, i+1));
 	}
 	return_mallocd_expr(.type = SHSL_EXPR_FUNCALL,
-			    .funcall_expr = (funcall_expr) {
+			    .funcall_expr = (shsl_funcall_expr) {
 				.fun_expr = fun_expr,
 				.args_exprs = args_exprs,
 				.args_len = form_length - 1,
@@ -1465,60 +1651,168 @@ shsl_expression* shsl_form_to_expr(shsl_obj* form) {
 	// { compile to immediate lambda call }
 	// else
 	// { error }
-    case SHSL_OBJ_BUILTIN_FUN:
-    case SHSL_OBJ_USER_FUN:
-    case SHSL_OBJ_BUILTIN_MACRO:
-    case SHSL_OBJ_USER_MACRO:
-	return_error_expr
+    case SHSL_BUILTIN_FUN:
+    case SHSL_USER_FUN:
+    case SHSL_BUILTIN_MACRO:
+    case SHSL_USER_MACRO:
+	return shsl_error_expr
 	    (form,
 	     "cannot include function object in source code of expression!"); 
     }
-    assert(0 && "UNREACHABLE");
 }
-bool shsl_expr_is_error(shsl_expression* expr) {
+bool shsl_expr_is_error(shsl_expr* expr) {
     return expr->type == SHSL_EXPR_LITERAL
-	&& expr->literal->type == SHSL_OBJ_ERROR;
+	&& expr->literal->type == SHSL_ERR;
+}
+void shsl_expr_free(shsl_expr* expr) {
+    // recall
+    // expressions don't own any shsl_obj they might contain
+    // they only hold a reference to it
+    // only delete references to objects they hold, don't free them outright
+    // expressions *do* own their subexpressions
+    // free any subexpression of the expression you're freeing rn
+    switch(expr->type) {
+    case SHSL_EXPR_LITERAL:
+	shsl_del_ref(expr->literal);
+	free(expr);
+	break;
+    case SHSL_EXPR_LOOKUP:
+	shsl_del_ref(expr->lookup_symbol);
+	free(expr);
+	break;
+    case SHSL_EXPR_VEC:
+	for(size_t i = 0; i<expr->vec_expr.size; ++i) {
+	    shsl_expr_free(expr->vec_expr.elts[i]);
+	}
+	free(expr);
+	break;
+    case SHSL_EXPR_MAP:
+	for(size_t i = 0; i<expr->map_expr.size; ++i) {
+	    shsl_expr_free(expr->map_expr.keys[i]);
+	    shsl_expr_free(expr->map_expr.vals[i]);
+	}
+	free(expr);
+	break;
+    case SHSL_EXPR_IF:
+	shsl_expr_free(expr->if_expr.condition);
+	shsl_expr_free(expr->if_expr.then_part);
+	shsl_expr_free(expr->if_expr.else_part);
+	free(expr);
+	break;
+    case SHSL_EXPR_LET:
+	assert(0 && "TODO: free let expr");
+	break;
+    case SHSL_EXPR_WHILE:
+	assert(0 && "TODO: free while expr");
+	break;
+    case SHSL_EXPR_DO:
+	assert(0 && "TODO: free do expr");
+	break;
+    case SHSL_EXPR_DO_POKING:
+	assert(0 && "TODO: free do poking expr");
+	break;
+    case SHSL_EXPR_DEF:
+	assert(0 && "TODO: free def expr");
+	break;
+    case SHSL_EXPR_SET:
+	assert(0 && "TODO: free set expr");
+	break;
+    case SHSL_EXPR_FN:
+	assert(0 && "TODO: free fn expr");
+	break;
+    case SHSL_EXPR_MACRO:
+	assert(0 && "TODO: free macro expr");
+	break;
+    case SHSL_EXPR_FUNCALL:
+	fprintf(stderr, "[SHSL WARNING]: TODO free funcall expr\n");
+	break;
+    }
+}
+
+shsl_obj* shsl_env_mkframe(shsl_obj* syms, shsl_obj* vals) {
+    assert(syms->type == SHSL_VEC);
+    assert(vals->type == SHSL_VEC);
+    assert(syms->vec.size == vals->vec.size);
+
+    shsl_obj* frame = shsl_mkmap(syms->vec.size);
+    shsl_vec_foreach(i, sym, syms) {
+	shsl_obj* val = shsl_vec_get(vals, i);
+	shsl_map_set(frame, sym, val);
+    }
+    return frame;
 }
 
 /// EVALUATION FUNCTIONS DEFINITIONS
-shsl_obj* shsl_eval(shsl_expression* expr, shsl_obj* env) {
+// TODO: it
+shsl_obj* shsl_eval(shsl_expr* expr, shsl_obj* env) {
     switch(expr->type) {
     case SHSL_EXPR_LITERAL:
-	return shsl_obj_copy(expr->literal);
+	return shsl_copy(expr->literal);
     case SHSL_EXPR_LOOKUP:
 	return shsl_env_lookup(env, expr->lookup_symbol);
+
+    case SHSL_EXPR_VEC: {
+	size_t size = expr->vec_expr.size;
+	shsl_obj* vec = shsl_mkvec(size);
+	for(size_t i = 0; i<size; ++i)
+	    shsl_vec_push(vec, shsl_eval(expr->vec_expr.elts[i], env));
+	return vec;
+    }
+	
+    case SHSL_EXPR_MAP: {
+	size_t size = expr->map_expr.size;
+	shsl_obj* map = shsl_mkmap(size);
+	for(size_t i = 0; i<size; ++i)
+	    shsl_map_set(map,
+			 shsl_eval(expr->map_expr.keys[i], env),
+			 shsl_eval(expr->map_expr.vals[i], env));
+	return map;
+    }
+
     case SHSL_EXPR_IF:
 	if(shsl_is_truthy(shsl_eval(expr->if_expr.condition, env)))
 	    return shsl_eval(expr->if_expr.then_part, env);
 	else
 	    return shsl_eval(expr->if_expr.else_part, env);
-    case SHSL_EXPR_FUNCALL:
+    case SHSL_EXPR_FUNCALL: {
 	shsl_obj* fun = shsl_eval(expr->funcall_expr.fun_expr, env);
 	switch(fun->type) {
-	case SHSL_OBJ_BUILTIN_FUN: {
+	case SHSL_BUILTIN_FUN: {
 	    shsl_obj* args = shsl_eval_many_into_vec
-		(expr->funcall_expr.args_exprs, expr->funcall_expr.args_len, env);
-	    shsl_obj* res = fun->builtin_fun.apply(args);
-	    shsl_free_obj(args);
+		(expr->funcall_expr.args_exprs,
+		 expr->funcall_expr.args_len,
+		 env);
+	    // TODO: bit of a dick move, but as of now builtin funs
+	    // are evaluated within the calling environment
+	    // making them a gross violation of lexical binding
+	    shsl_obj* res = fun->builtin_fun.apply(args, env);
+	    shsl_obj_free(args);
 	    return res;
 	}
-	case SHSL_OBJ_USER_FUN:
-	    return_error(fun, "not implemented yet!"); 
-	case SHSL_OBJ_BUILTIN_MACRO:
-	    return_error(fun, "not implemented yet!"); 
-	case SHSL_OBJ_USER_MACRO:
-	    return_error(fun, "not implemented yet!"); 
+	case SHSL_USER_FUN:
+	    return shsl_mkerr(fun, "not implemented yet!"); 
+	case SHSL_BUILTIN_MACRO:
+	    return shsl_mkerr(fun, "not implemented yet!"); 
+	case SHSL_USER_MACRO:
+	    return shsl_mkerr(fun, "not implemented yet!"); 
 	default:
-	    return_error(fun, "object is not callable!"); 
+	    return shsl_mkerr(fun, "object is not callable!"); 
 	}
-	
-    default:
+    }
+    case SHSL_EXPR_WHILE:
+    case SHSL_EXPR_DO:
+    case SHSL_EXPR_DO_POKING:
+    case SHSL_EXPR_LET:
+    case SHSL_EXPR_DEF:
+    case SHSL_EXPR_SET:
+    case SHSL_EXPR_FN:
+    case SHSL_EXPR_MACRO:
 	assert(0 && "TODO");
     }
 }
-shsl_obj* shsl_eval_many_into_vec(shsl_expression** args, size_t args_len,
+shsl_obj* shsl_eval_many_into_vec(shsl_expr** args, size_t args_len,
 				  shsl_obj* env) {
-    shsl_obj* vec_obj = shsl_obj_mkvec(args_len);
+    shsl_obj* vec_obj = shsl_mkvec(args_len);
     for(size_t i = 0; i<args_len; ++i) {
 	shsl_vec_push(vec_obj, shsl_eval(args[i], env));
     }
@@ -1526,129 +1820,142 @@ shsl_obj* shsl_eval_many_into_vec(shsl_expression** args, size_t args_len,
 }
 
 /// BUILTIN FUNCTIONS DEFINITIONS
-#define shsl_fun_assert_vec(caller, args) do {		\
-	if(!shsl_is_vec(args))				\
-	    return_error(args, "in function "caller	\
-			 " args is not a vector!");	\
-    } while(0)
-#define shsl_fun_assert_size(caller, args, pred) do {		\
-	if(!(args->vec.size pred))				\
-	    return_error(args, "in function "caller		\
-			 " length of args is not "#pred"!");	\
-    } while(0)
-#define shsl_fun_assert_type(caller, args, i, t) do {			\
-	if(args->vec.buf[i]->type != t)					\
-	    return_error_fmt(args, "in function "caller" args[%zu]"	\
-			     "should have been of type " #t		\
-			     " but is not!", (size_t)i);		\
-    } while(0)
-#define shsl_fun_assert_type_either(caller, args, i, t1, t2) do {	\
-	if(args->vec.buf[i]->type != t1					\
-	   && args->vec.buf[i]->type != t2)				\
-	    return_error_fmt(args, "in function "caller" args[%zu]"	\
-			     "should have been either of type "		\
-			     #t1 " or " #t2				\
-			     " but is of neither!", (size_t)i);		\
-    } while(0)
 
-#define shsl_defun(name, env_name, args_name, body)			\
-    shsl_obj* shsl_fun##_name(shsl_obj* env_name, shsl_obj* args_name)	\
+// macros to aid in defining a builtin function to call from shsl code
+// nothing fancy, just factoring out the boring work
+// I might have committed "make a dsl with the c preprocessor" :(, sory
+#define shsl_defun(c_name, shsl_name, args_name, env_name, ...)		\
+    shsl_obj* c_name(shsl_obj* args_name, shsl_obj* env_name)		\
     {									\
-	shsl_fun_assert_vec(#name, args_name);				\
-	const char* shsl_fun_name = #name;	/* used by macros */	\
-	(void)shsl_fun_name;						\
-	(void)env_name;							\
-	do body while(0);						\
+	const char* shsl_fun_name = shsl_name;	/* used by macros */	\
+	shsl_fun_assert_vec((args_name));				\
+	do __VA_ARGS__ while(0);					\
     }									\
 
-shsl_defun(vecget, env, args, {
-	shsl_fun_assert_size("vecget", args, ==2);
-	shsl_fun_assert_type("vecget", args, 0, SHSL_OBJ_VEC);
-	shsl_fun_assert_type("vecget", args, 1, SHSL_OBJ_INT);
+#define shsl_fun_assert(ass) do {				\
+	if(!(ass))						\
+	    return shsl_mkerr(&SHSL_GLOBAL_NIL,			\
+			      "in function %s, assertion "	\
+			      #ass "failed!", shsl_fun_name);	\
+    } while(0)
+
+#define shsl_fun_assert_vec(args)		\
+    shsl_fun_assert(shsl_is_vec(args))
+
+#define shsl_fun_assert_size(args, pred)		\
+    shsl_fun_assert((shsl_vec_length(args)) pred)
+
+#define shsl_fun_assert_type(args, i, t)		\
+    shsl_fun_assert(shsl_vec_get(args, i)->type == (t))
+
+#define shsl_fun_assert_type_either(args, i, t1, t2)		\
+    shsl_fun_assert(shsl_vec_get(args, i)->type == (t1) ||	\
+		    shsl_vec_get(args, i)->type == (t2))
+
+shsl_defun(shsl_builtin_vecget, "vecget", args, env, {
+	(void)env;
+	shsl_fun_assert_size(args, == 2);
+	shsl_fun_assert_type(args, 0, SHSL_VEC);
+	shsl_fun_assert_type(args, 1, SHSL_INT);
 	return shsl_vec_get(args, (size_t)shsl_vec_get(args, 1)->i);
     })
 
 /// SHSL ARITHMETIC FUNCTIONS DEFINITIONS
-shsl_obj* shsl_fun_add_all(shsl_obj* args) {
-    shsl_fun_assert_vec("+", args);
-    // we don't support floats rn :(
-    for(size_t i = 0; i<args->vec.size; ++i)
-	shsl_fun_assert_type("+", args, i, SHSL_OBJ_INT);
+shsl_defun(shsl_builtin_add, "+", args, env, {
+	(void)env;
+	shsl_vec_foreach(i, elt, args)
+	    shsl_fun_assert_type_either(args, i, SHSL_INT, SHSL_REAL);
 
-    long acc = 0;
-    for(size_t i = 0; i<args->vec.size; ++i)
-	acc += args->vec.buf[i]->i;
-    return shsl_obj_mkint(acc);
-}
-shsl_obj* shsl_fun_sub(shsl_obj* args) {
-    shsl_fun_assert_vec("-", args);
-    for(size_t i = 0; i<args->vec.size; ++i)
-	shsl_fun_assert_type("-", args, i, SHSL_OBJ_INT);
+	long intsum = 0;
+	double longsum = 0.0;
+	shsl_vec_foreach(i, elt, args) {
+	    if(elt->type == SHSL_REAL)
+		goto longsum;
+	    else
+		intsum += elt->i;
+	}
+	return shsl_mkint(intsum);
 
-    if(args->vec.size == 0)
-	return shsl_obj_mkint(0);
-    if(args->vec.size == 1)
-	return shsl_obj_mkint(args->vec.buf[0]->i);
+    longsum:
+	shsl_vec_foreach(i, elt, args)
+	    longsum += shsl_is_int(elt)?(double)elt->i:elt->r;
+	return shsl_mkreal(longsum);
+    })
 
-    long acc = args->vec.buf[0]->i;
-    for(size_t i = 1; i<args->vec.size; ++i)
-	acc -= args->vec.buf[i]->i;
-    return shsl_obj_mkint(acc);
-}
-shsl_obj* shsl_fun_mul_all(shsl_obj* args) {
-    shsl_fun_assert_vec("*", args);
-    for(size_t i = 0; i<args->vec.size; ++i)
-	shsl_fun_assert_type("*", args, i, SHSL_OBJ_INT);
+shsl_defun(shsl_builtin_sub, "-", args, env, {
+	(void)env;
+	shsl_vec_foreach(i, elt, args)
+	    shsl_fun_assert_type_either(args, i, SHSL_INT, SHSL_REAL);
 
-    long acc = 1;
-    for(size_t i = 0; i<args->vec.size; ++i)
-	acc *= args->vec.buf[i]->i;
-    return shsl_obj_mkint(acc);
-}
-shsl_obj* shsl_fun_div(shsl_obj* args) {
-    shsl_fun_assert_vec("/", args);
-    shsl_fun_assert_size("/", args, == 2);
-    shsl_fun_assert_type_either("/", args, 0, SHSL_OBJ_INT, SHSL_OBJ_REAL);
-    shsl_fun_assert_type_either("/", args, 1, SHSL_OBJ_INT, SHSL_OBJ_REAL);
+	if(args->vec.size == 0)
+	    return shsl_mkint(0);
+	if(args->vec.size == 1)
+	    return shsl_mkint(shsl_vec_get(args, 0)->i);
 
-    // handle case where it returns integer
-    if(args->vec.buf[0]->type == SHSL_OBJ_INT &&
-       args->vec.buf[1]->type == SHSL_OBJ_INT &&
-       args->vec.buf[1]->i != 0 &&
-       (args->vec.buf[0]->i % args->vec.buf[1]->i) == 0)
-	return shsl_obj_mkint(args->vec.buf[0]->i/args->vec.buf[1]->i);
+	long acc = args->vec.buf[0]->i;
+	for(size_t i = 1; i<shsl_vec_length(args); ++i) {
+	    acc -= shsl_vec_get(args, i)->i;
+	}
 
-    double a = args->vec.buf[0]->type == SHSL_OBJ_INT
-	? args->vec.buf[0]->i
-	: args->vec.buf[0]->r;
-    double b = args->vec.buf[1]->type == SHSL_OBJ_INT
-	? args->vec.buf[1]->i
-	: args->vec.buf[1]->r;
+	return shsl_mkint(acc);
+    })
+shsl_defun(shsl_builtin_mul, "*", args, env, {
+	(void)env;
+	// we don't support floats yet :|
+	shsl_vec_foreach(i, elt, args)
+	    shsl_fun_assert_type(args, i, SHSL_INT);
 
-    if(b == 0.0)
-	return_error(args, "in function /: division by zero!");
+	long acc = 1;
+	shsl_vec_foreach(i, elt, args)
+	    acc *= elt->i;
 
-    return shsl_obj_mkreal(a/b);
-}
+	return shsl_mkint(acc);
+    })
+shsl_defun(shsl_builtin_div, "/", args, env, {
+	(void)env;
+	shsl_fun_assert_size(args, == 2);
+	shsl_fun_assert_type_either(args, 0, SHSL_INT, SHSL_REAL);
+	shsl_fun_assert_type_either(args, 1, SHSL_INT, SHSL_REAL);
+
+	// handle case where it returns integer
+	if(args->vec.buf[0]->type == SHSL_INT &&
+	   args->vec.buf[1]->type == SHSL_INT &&
+	   args->vec.buf[1]->i != 0 &&
+	   (args->vec.buf[0]->i % args->vec.buf[1]->i) == 0)
+	    return shsl_mkint(args->vec.buf[0]->i/args->vec.buf[1]->i);
+
+	double a = args->vec.buf[0]->type == SHSL_INT
+	    ? args->vec.buf[0]->i
+	    : args->vec.buf[0]->r;
+	double b = args->vec.buf[1]->type == SHSL_INT
+	    ? args->vec.buf[1]->i
+	    : args->vec.buf[1]->r;
+
+	if(b == 0.0)
+	    return shsl_mkerr(args, "in function /: division by zero!");
+
+	return shsl_mkreal(a/b);
+    })
 
 /// ENVIRONMENT FUNCTIONS DEFINITIONS
-shsl_obj* shsl_make_initial_frame() {
-    shsl_obj* map_obj = shsl_obj_mkmap(20);
+shsl_obj* shsl_make_initial_env(void) {
+    shsl_obj* frame_obj = shsl_mkmap(20);
+    shsl_obj* env_obj = shsl_mkcons(frame_obj, &SHSL_GLOBAL_NIL);
     // t
-    shsl_obj* t = shsl_obj_mksym("t");
-    shsl_map_set(map_obj, t, t); // t is self evaluating
+    shsl_obj* t = shsl_mksym("t");
+    shsl_map_set(frame_obj, t, t); // t is self evaluating
 
     // arithmetic operations 
     // + - * / > < >= <=
-    // I might make == generic compairison
-    shsl_map_set(map_obj, shsl_obj_mksym("+"),
-    		 shsl_obj_mkbuiltin_fun(&SHSL_NIL, shsl_fun_add_all));
-    shsl_map_set(map_obj, shsl_obj_mksym("-"),
-    		 shsl_obj_mkbuiltin_fun(&SHSL_NIL, shsl_fun_sub));
-    shsl_map_set(map_obj, shsl_obj_mksym("*"),
-    		 shsl_obj_mkbuiltin_fun(&SHSL_NIL, shsl_fun_mul_all));
-    shsl_map_set(map_obj, shsl_obj_mksym("/"),
-    		 shsl_obj_mkbuiltin_fun(&SHSL_NIL, shsl_fun_div));
+    // I might make == generic compairison (a synonim for eq/equal)
+    shsl_map_set(frame_obj, shsl_mksym("+"),
+		 shsl_mkbuiltin_fun(env_obj, shsl_builtin_add));
+    shsl_map_set(frame_obj, shsl_mksym("-"),
+		 shsl_mkbuiltin_fun(env_obj, shsl_builtin_sub));
+    shsl_map_set(frame_obj, shsl_mksym("*"),
+		 shsl_mkbuiltin_fun(env_obj, shsl_builtin_mul));
+    shsl_map_set(frame_obj, shsl_mksym("/"),
+		 shsl_mkbuiltin_fun(env_obj, shsl_builtin_div));
 
     // list operations
     // cons, iscons, list, islist, isproper, car, cdr, null
@@ -1671,18 +1978,15 @@ shsl_obj* shsl_make_initial_frame() {
     // this is gonna have to be a special form :| 
 
     // TODO: ctypes equivalent
-    return map_obj;
-}
-shsl_obj* shsl_make_initial_env() {
-    return shsl_obj_mkcons(shsl_make_initial_frame(), &SHSL_NIL);
+    return env_obj;
 }
 shsl_obj* shsl_env_lookup(shsl_obj* env, shsl_obj* key) {
-    assert(key->type == SHSL_OBJ_SYM);
+    assert(key->type == SHSL_SYM);
     if(shsl_is_nil(env))
-	return_error(key, "symbol not found!");
+	return shsl_mkerr(key, "symbol not found!");
 
-    assert(env->type == SHSL_OBJ_CONS);
-    assert(env->cons.car->type == SHSL_OBJ_MAP);
+    assert(env->type == SHSL_CONS);
+    assert(env->cons.car->type == SHSL_MAP);
 
     ssize_t i = shsl_map_index(env->cons.car, key);
     if(i>=0)
@@ -1747,27 +2051,27 @@ void shsl_dbg_fputtok(const shsl_token* tok, FILE* restrict stream) {
 }
 void shsl_fputobj(const shsl_obj* obj, FILE* restrict stream) {
     switch(obj->type) {
-    case SHSL_OBJ_INT:
+    case SHSL_INT:
 	fprintf(stream, "%ld", obj->i);
 	break;
-    case SHSL_OBJ_REAL:
+    case SHSL_REAL:
 	fprintf(stream, "%f", obj->r);
 	break;
-    case SHSL_OBJ_STRING:
+    case SHSL_STRING:
 	fprintf(stream, "\"%s\"", obj->str);
 	break;
-    case SHSL_OBJ_SYM:
+    case SHSL_SYM:
 	fprintf(stream, "%s", obj->sym.name->str);
 	break;
-    case SHSL_OBJ_NIL:
+    case SHSL_NIL:
 	fputs("nil", stream);
 	break;
-    case SHSL_OBJ_ERROR:
+    case SHSL_ERR:
 	fprintf(stream, "(ERROR: \"%s\" WITH DATA ", obj->err.msg->str);
 	shsl_fputobj(obj->err.data, stream);
 	fprintf(stream, ")");
 	break;
-    case SHSL_OBJ_CONS:
+    case SHSL_CONS:
 	if(shsl_is_proper_list(obj)) {
 	    fputc('(', stream);
 	    while(shsl_is_cons(obj)) {
@@ -1786,7 +2090,7 @@ void shsl_fputobj(const shsl_obj* obj, FILE* restrict stream) {
 	    fputc(')', stream);
 	}
 	break;
-    case SHSL_OBJ_VEC:
+    case SHSL_VEC:
 	fputc('[', stream);
 	for(size_t i = 0; i<obj->vec.size; ++i) {
 	    shsl_fputobj(obj->vec.buf[i], stream);
@@ -1795,7 +2099,7 @@ void shsl_fputobj(const shsl_obj* obj, FILE* restrict stream) {
 	}
 	fputc(']', stream);
 	break;
-    case SHSL_OBJ_MAP:
+    case SHSL_MAP:
 	fputc('{', stream);
 	for(size_t i = 0; i<obj->map.size; ++i) {
 	    shsl_fputobj(obj->map.buf[i].k, stream);
@@ -1806,28 +2110,38 @@ void shsl_fputobj(const shsl_obj* obj, FILE* restrict stream) {
 	}
 	fputc('}', stream);
 	break;
-    case SHSL_OBJ_BUILTIN_FUN:
+    case SHSL_BUILTIN_FUN:
 	fprintf(stdout, "SHSL_BUILTIN_FUN_%p", (void*)obj);
 	break;
-    case SHSL_OBJ_USER_FUN:
+    case SHSL_USER_FUN:
 	fprintf(stdout, "SHSL_USER_FUN_%p", (void*)obj);
 	break;
-    case SHSL_OBJ_BUILTIN_MACRO:
+    case SHSL_BUILTIN_MACRO:
 	fprintf(stdout, "SHSL_BUILTIN_MACRO_%p", (void*)obj);
 	break;
-    case SHSL_OBJ_USER_MACRO:
+    case SHSL_USER_MACRO:
 	fprintf(stdout, "SHSL_USER_MACRO_%p", (void*)obj);
 	break;
     };
 }
-#ifdef SHSL_MAIN
 
-shsl_obj* eval_str(char* c, shsl_obj* env) {
+//// USER FACING FUNCTIONS DEFINITIONS
+//// ----------------------------------------------------------------------------
+shsl_obj* shsl_eval_str(char* c, shsl_obj* env) {
     parser_pair p = parse_off(c);
-    shsl_expression* expr = shsl_form_to_expr(p.obj);
-    return shsl_eval(expr, env); 
-}
+    // TODO: make form_to_expr accept an environment so we can do macro expansion
+    // during form "compilation"?
+    shsl_add_ref(p.obj);
+    shsl_expr* expr = shsl_form_to_expr(p.obj);
+    shsl_del_ref(p.obj);
 
+    shsl_obj* res = shsl_eval(expr, env);
+    shsl_expr_free(expr);
+    return res; 
+}
+#endif // SHSL_IMPLEMENTATION
+
+#ifdef SHSL_MAIN
 int main(int argc, char** argv) {
     // usage
     // -e 'str' evals that string
@@ -1839,7 +2153,7 @@ int main(int argc, char** argv) {
     shsl_obj* env = shsl_make_initial_env();
     while(i<argc) {
 	if(strcmp(argv[i], "-e") == 0) {
-	    shsl_fputobj(eval_str(argv[i+1], env), stdout);
+	    shsl_fputobj(shsl_eval_str(argv[i+1], env), stdout);
 	    puts("");
 	    i+=2;
 	}
@@ -1864,5 +2178,4 @@ int main(int argc, char** argv) {
 }
 #endif // SHSL_MAIN
 
-#endif // SHSL_IMPLEMENTATION
 #endif // SHSL_H

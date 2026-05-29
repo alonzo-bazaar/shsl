@@ -16,11 +16,11 @@ build_clean_shsl() {
 
 build_clean_shsl
 if [[ shsl_build_result ]]; then
+    echo ""
     echo "successfully built shsl! now testing it"
-    echo ""
 else
-    echo "shsl build exited with error! not proceeding further"
     echo ""
+    echo "shsl build exited with error! not proceeding further"
     exit "$shsl_build_result"
 fi
 
@@ -56,7 +56,7 @@ assert_shsl_equal '-1' "(- 2 3)" "subtraction order"
 # literals (warning: depends on pretty printing used)
 assert_shsl_equal '(a b c d)' "'(a b c d)" "quoted litst"
 assert_shsl_equal '[a, b, c, d]' "'[a b c d]" "quoted vector literals"
-assert_shsl_equal '{a:b, c,d}' "'{a b c d}" "quoted map literals"
+assert_shsl_equal '{a:b, c:d}' "'{a b c d}" "quoted map literals"
 
 # operations on collection literals
 

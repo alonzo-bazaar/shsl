@@ -1,18 +1,43 @@
-CC = gcc
-CFLAGS = -Wall -Wextra -Wpedantic -Werror -g3 -ggdb
-SHSL_DEFINES = -DSHSL_IMPLEMENTATION -DSHSL_MAIN
-SHSL_LOG_DEFINES += -DSHSL_LOG_RETURN_ERROR -DSHSL_LOG_RETURN_ERROR_EXPR
+CC = clang
 
-ifeq ($(LOG_GC), yes)
-	SHSL_LOG_DEFINES += -DSHSL_LOG_GC
+SHSL_IMPL_DEFS = -DSHSL_IMPLEMENTATION
+SHSL_ERR_LOG_DEFS = -DSHSL_LOG_ERROR -DSHSL_LOG_ERROR_EXPR
+SHSL_MEM_LOG_DEFS = -DSHSL_LOG_GC -DSHSL_LOG_DEL_REF
+
+TEST_LOG_DEFS = -DSHSL_LOG_TESTS
+
+SHSL_LIB_CFLAGS = -Wall -Wextra -Wpedantic -Werror -g3 -ggdb
+# log whenver an error value is returned
+ifeq ($(LOG_ERR), yes)
+	SHSL_LIB_CFLAGS += $(SHSL_ERR_LOG_DEFS)
+endif
+# log all significant memory actions
+# if used for regular tests it's gonna turn to logging diarrhea
+# recommended you only use this you plan to piecemeal test with ./shsl -e or ./shsl -r
+ifeq ($(LOG_MEM), yes)
+	SHSL_LIB_CFLAGS += $(SHSL_MEM_LOG_DEFS) 
 endif	
 
-tests: shsl.h tests.c
-	$(CC) $(CFLAGS) -O0 $(SHSL_LOG_DEFINES) -o tests shsl.h tests.c
+SHSL_MAIN_CFLAGS = $(SHSL_LIB_CFLAGS) $(SHSL_IMPL_DEFS) -DSHSL_MAIN -x c
+TEST_MAIN_CFLAGS = $(SHSL_LIB_CFLAGS)
+ifeq ($(LOG_TESTS), yes)
+	TEST_MAIN_CFLAGS += $(TEST_LOG_DEFS)
+endif
+
 shsl: shsl.h
-	$(CC) $(CFLAGS) $(SHSL_DEFINES) $(SHSL_LOG_DEFINES) -x c -o shsl shsl.h
+	$(CC) $(SHSL_MAIN_CFLAGS) -o shsl shsl.h
+tests: shsl.h tests.c
+	$(CC) $(TEST_MAIN_CFLAGS) -o tests tests.c 
+.PHONY: shsl tests
+
+# delete shsl and tests file only if they exist
+# https://stackoverflow.com/questions/5553352/how-do-i-check-if-file-exists-in-makefile-so-i-can-delete-it
 clean:
-	(test -a shsl) && rm shsl
-	(test -a tests) && rm tests
+ifneq ("", "$(wildcard shsl)")
+	rm shsl
+endif
+ifneq ("", "$(wildcard tests)")
+	rm tests
+endif
 test: tests
 	./tests

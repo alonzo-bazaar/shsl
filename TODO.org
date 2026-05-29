@@ -1,0 +1,6 @@
+- [ ] vec expression
+- [ ] map expression
+- [ ] object copy
+- [ ] -e flag
+- [ ] user functions (object)
+- [ ] user functions (expression/parsing)
