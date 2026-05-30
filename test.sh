@@ -66,6 +66,12 @@ assert_shsl_equal '[1, 2, 3, 10]' "[1 2 3 (+ 5 5)]"\
 assert_shsl_equal '{1:2, 10:4}' "{1 2 (+ 6 4) 4}" "unquoted maps with computed keys"
 assert_shsl_equal '{1:2, 3:10}' "{1 2 3 (+ 6 4)}" "unquoted maps with computed values"
 
+assert_shsl_equal '[]' "[]" "empty vector"
+assert_shsl_equal '[]' "'[]" "empty quoted vector"
+
+assert_shsl_equal '{}' "{}" "empty map"
+assert_shsl_equal '{}' "'{}" "empty quoted map"
+
 # operations on collection literals
 
 # do blocks
