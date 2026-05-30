@@ -1,6 +1,16 @@
-- [ ] vec expression
-- [ ] map expression
-- [ ] object copy
-- [ ] -e flag
+- [X] vec expression
+- [X] map expression
+- [X] object copy
+- [X] -e flag (was already implemented)
+- [ ] -r flag
+
+- [ ] debug why ~do_expr~ evaluation occasionally leads to a reference count below 0
+
 - [ ] user functions (object)
+  - [ ] lambda list
 - [ ] user functions (expression/parsing)
+
+- [ ] builtin functions
+- [ ] predicates (isnil, iscons, islist, iserr, isvec, ismap, et al.)
+- [ ] get
+- [ ] set

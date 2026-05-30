@@ -1,4 +1,4 @@
-CC = clang
+CC = gcc
 
 SHSL_IMPL_DEFS = -DSHSL_IMPLEMENTATION
 SHSL_ERR_LOG_DEFS = -DSHSL_LOG_ERROR -DSHSL_LOG_ERROR_EXPR
@@ -6,7 +6,8 @@ SHSL_MEM_LOG_DEFS = -DSHSL_LOG_GC -DSHSL_LOG_DEL_REF
 
 TEST_LOG_DEFS = -DSHSL_LOG_TESTS
 
-SHSL_LIB_CFLAGS = -Wall -Wextra -Wpedantic -Werror -g3 -ggdb
+CFLAGS = -Wall -Wextra -Wpedantic -Wswitch -Werror -Wno-parentheses -O0 -g3 -ggdb
+SHSL_LIB_CFLAGS = $(CFLAGS)
 # log whenver an error value is returned
 ifeq ($(LOG_ERR), yes)
 	SHSL_LIB_CFLAGS += $(SHSL_ERR_LOG_DEFS)

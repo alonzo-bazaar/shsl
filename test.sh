@@ -58,10 +58,21 @@ assert_shsl_equal '(a b c d)' "'(a b c d)" "quoted litst"
 assert_shsl_equal '[a, b, c, d]' "'[a b c d]" "quoted vector literals"
 assert_shsl_equal '{a:b, c:d}' "'{a b c d}" "quoted map literals"
 
+# evaluating maps and vectors
+assert_shsl_equal '[1, 2, 3, 4]' "[1 2 3 4]" "unquoted vectors"
+assert_shsl_equal '{1:2, 3:4}' "{1 2 3 4}" "unquoted maps"
+assert_shsl_equal '[1, 2, 3, 10]' "[1 2 3 (+ 5 5)]"\
+		  "unquoted vectors with computed elements"
+assert_shsl_equal '{1:2, 10:4}' "{1 2 (+ 6 4) 4}" "unquoted maps with computed keys"
+assert_shsl_equal '{1:2, 3:10}' "{1 2 3 (+ 6 4)}" "unquoted maps with computed values"
+
 # operations on collection literals
 
-
-
-# evaluating maps and vectors
+# do blocks
+# (newlines in bash are fucking weird bruh)
+assert_shsl_equal $'fuckyou\nnil' "(do (print 'fuck) (println 'you))" "do blocks"
+# assert_shsl_equal $'youfuck\nnil' "(do (print 'you) (println 'fuck))" "do blocks"
+# assert_shsl_equal $'fuck\nyou\nnil' "(do (println 'fuck) (println 'you))" "do blocks"
+# assert_shsl_equal $'you\nfuck\nnil' "(do (println 'you) (println 'fuck))" "do blocks"
 
 echo "if you see this and nothing blew up then all tests pass!"
