@@ -107,15 +107,15 @@ void test_collection_builders(void) {
 
 // test collection literals
 void test_list_literals(void) {
-    shsl_ref lst = shsl_eval_str("'(a b c)", ref_to_nil());
+    shsl_ref lst = shsl_eval_str("'(a b c)", shsl_ref_to_nil());
     assert(shsl_is_cons(lst));
 }
 void test_vec_literals(void) {
-    shsl_ref vec = shsl_eval_str("'[a b c]", ref_to_nil());
+    shsl_ref vec = shsl_eval_str("'[a b c]", shsl_ref_to_nil());
     assert(shsl_is_vec(vec));
 }
 void test_map_literals(void) {
-    shsl_ref map = shsl_eval_str("'{a b c c}", ref_to_nil());
+    shsl_ref map = shsl_eval_str("'{a b c c}", shsl_ref_to_nil());
     assert(shsl_is_map(map));
 }
 void test_collection_literals(void) {
@@ -126,16 +126,16 @@ void test_collection_literals(void) {
 
 // test error generation
 void test_error(void) {
-    shsl_ref s = shsl_mkerr(ref_to_nil(), "%s",
+    shsl_ref s = shsl_mkerr(shsl_ref_to_nil(), "%s",
 			    "test error generation");
     assert(streq(s.ptr->err.msg.ptr->str, "test error generation"));
 }
 
 void test_some_shit(void) {
-    shsl_ref a = shsl_eval_str("'a", ref_to_nil());
+    shsl_ref a = shsl_eval_str("'a", shsl_ref_to_nil());
     assert(shsl_is_sym(a) && "symbol literal did not return a symbol");
 
-    shsl_ref b = shsl_eval_str("(if 'a 'b 'c)", ref_to_nil());
+    shsl_ref b = shsl_eval_str("(if 'a 'b 'c)", shsl_ref_to_nil());
     assert(shsl_is_sym(b)
 	   && "conditional returning symbol literal didn't return symbol");
 
