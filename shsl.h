@@ -540,17 +540,17 @@ void shsl_ref_del(shsl_ref ref) {
     fprintf(stdout, "[SHSL GC] "); shsl_fputobj(ref, stdout);
     fprintf(stdout, "[SHSL GC] was at refcount %d\n", ref.ptr->ref_count);
 #endif    
+    if(ref.ptr->type == SHSL_NIL)
+	return;
 
-    if(ref.ptr->type != SHSL_NIL) {
-	ref.ptr->ref_count--;
-	if(ref.ptr->ref_count == 0)
-	    shsl_free(ref);
-	else if(ref.ptr->ref_count < 0)
-            // *else if*, not if
-            // having just if here is reading (potentially) freed data
-            // and that's no good
-	    fprintf(stderr, "now you fucked up!\n");
-    }
+    ref.ptr->ref_count--;
+    if(ref.ptr->ref_count == 0)
+	shsl_free(ref);
+    else if(ref.ptr->ref_count < 0)
+	// *else if*, not if
+	// having just if here is reading (potentially) freed data
+	// and that's no good
+	fprintf(stderr, "now you fucked up!\n");
 }
 void shsl_ref_mark_weak(shsl_ref ref) {
     if(!ref.is_weak) {
@@ -749,7 +749,7 @@ shsl_ref shsl_mkbuiltin_fun(shsl_ref env,
     return_mallocd_obj(.ref_count = 0,
 		       .type = SHSL_BUILTIN_FUN,
 		       .builtin_fun = (shsl_builtin_fun) {
-			   .env = env,
+			   .env = shsl_ref_add(env),
 			   .apply = apply,
 		       }
 		      );
@@ -2324,13 +2324,13 @@ shsl_defun(shsl_builtin_sub, "-", args, env, {
 		if(!shsl_is_int(shsl_vec_get(args, i)))
 		    goto realdiff;
 		else
-		    intdiff += shsl_int(shsl_vec_get(args, i));
+		    intdiff -= shsl_int(shsl_vec_get(args, i));
 	    return shsl_mkint(intdiff);
 
 	    realdiff:
 	    double realdiff = shsl_real(shsl_vec_get(args, 0));
 	    for(size_t i = 1; i<shsl_vec_length(args); ++i)
-		realdiff += shsl_real(shsl_vec_get(args, i)); 
+		realdiff -= shsl_real(shsl_vec_get(args, i)); 
 	    return shsl_mkreal(realdiff);
 	}
 	}
