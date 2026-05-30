@@ -138,3 +138,8 @@ I have two ideas at the moment for how to make shsl an actually single header sc
   #+end_src
   this would also allow for the user to pick between which of the two versions are best suited for whatever the fuck the user wants to do, although the main reason for this latter idea is the rather simple fact that I cannot be fucked to edit a file longer than about 300 lines.
   Another advantage of this second approach is that, given that I want to try out different garbage collectors, I can just swap in another ~src/gc.c~ and rerun the script, no weird ifdefs or giant files needed.
+
+* refs
+godo, nella ref posso mettere se è mutable
+e se manipolo le ref solo con funzioni che accettano ref poi quelle funzioni posso fargli ritornare, /for instance/, ~t~ o un errore
+daje
