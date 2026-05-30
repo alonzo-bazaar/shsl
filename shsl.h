@@ -416,10 +416,12 @@ typedef struct shsl_obj {
 
 shsl_obj SHSL_GLOBAL_NIL = {0};
 shsl_ref shsl_ref_to_nil() {
-    return (shsl_ref) {
+    static shsl_ref nilref;
+    nilref = (shsl_ref) {
         .ptr = &SHSL_GLOBAL_NIL,
         .is_weak = true,
     };
+    return nilref;
 }
 
 /// DATA PREDICATES DEFINITIONS
@@ -599,7 +601,7 @@ void shsl_free(shsl_ref ref) {
 #endif
     switch(shsl_type(ref)) {
     case SHSL_NIL:
-	fprintf(stderr, "cannot free NIL! You fucked something up!\n");
+	// fprintf(stderr, "cannot free NIL! You fucked something up!\n");
 	break;
 
     case SHSL_STRING:
@@ -681,6 +683,7 @@ void shsl_ref_set(shsl_ref* dst, shsl_ref src) {
     shsl_ref_add(src);
     shsl_ref_del(*dst);
     dst->ptr = src.ptr;
+    dst->is_weak = src.is_weak;
 }
 
 shsl_ref shsl_mkint(long l) {
