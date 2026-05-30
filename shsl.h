@@ -416,12 +416,10 @@ typedef struct shsl_obj {
 
 shsl_obj SHSL_GLOBAL_NIL = {0};
 shsl_ref shsl_ref_to_nil() {
-    static shsl_ref nilref;
-    nilref = (shsl_ref) {
+    return (shsl_ref) {
         .ptr = &SHSL_GLOBAL_NIL,
         .is_weak = true,
     };
-    return nilref;
 }
 
 /// DATA PREDICATES DEFINITIONS
@@ -741,8 +739,6 @@ shsl_ref shsl_mkcons(shsl_ref car, shsl_ref cdr) {
 		      );
 }
 shsl_ref shsl_mkvec(size_t initial_capacity) {
-    assert(initial_capacity > 0);
-
     return_mallocd_obj(.ref_count = 0,
 		       .type = SHSL_VEC,
 		       .vec = (shsl_vec) {
@@ -753,7 +749,6 @@ shsl_ref shsl_mkvec(size_t initial_capacity) {
 		      );
 }
 shsl_ref shsl_mkmap(size_t initial_capacity) {
-    assert(initial_capacity > 0);
     return_mallocd_obj(.ref_count = 0,
 		       .type = SHSL_MAP,
 		       .map = (shsl_map){
@@ -2028,16 +2023,12 @@ void shsl_expr_free(shsl_expr* expr) {
 	free(expr);
 	break;
     case SHSL_EXPR_VEC:
-	for(size_t i = 0; i<expr->vec_expr.size; ++i) {
-	    shsl_expr_free(expr->vec_expr.elts[i]);
-	}
+	shsl_free_expr_arr(expr->vec_expr.elts, expr->vec_expr.size);
 	free(expr);
 	break;
     case SHSL_EXPR_MAP:
-	for(size_t i = 0; i<expr->map_expr.size; ++i) {
-	    shsl_expr_free(expr->map_expr.keys[i]);
-	    shsl_expr_free(expr->map_expr.vals[i]);
-	}
+	shsl_free_expr_arr(expr->map_expr.keys, expr->map_expr.size);
+	shsl_free_expr_arr(expr->map_expr.vals, expr->map_expr.size);
 	free(expr);
 	break;
     case SHSL_EXPR_IF:
