@@ -2988,10 +2988,14 @@ char* shsl_read_file(const char *path){//, size_t* file_size) {
 
 void shsl_eval_file(const char* filepath, shsl_ref env) {
     char* c = shsl_read_file(filepath);
+    // we'll use c to iterate but we need the file start to free it later
+    char* anchor = c;
     if(!c) return;
 
-    while(c) {
+    while(true) {
 	parser_pair p = parse_off(c);
+	c = p.remaining;
+	if(!c) break;
 
 	shsl_ref_add(p.ref);
 	shsl_expr* expr = shsl_form_to_expr(p.ref);
@@ -2999,10 +3003,9 @@ void shsl_eval_file(const char* filepath, shsl_ref env) {
 
 	shsl_eval(expr, env);
 	shsl_expr_free(expr);
-	c = p.remaining;
     }
 
-    free(c);
+    free(anchor);
 }
 
 void shsl_repl(shsl_ref env) {
