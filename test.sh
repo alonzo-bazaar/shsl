@@ -10,7 +10,7 @@ build_clean_shsl() {
     echo "cleaning previous shsl..."
     make clean
     echo "building new shsl..."
-    LOG_GC=no make shsl
+    LOG_MEM=no LOG_ERR=yes make shsl
     shsl_build_result=$?
 }
 
@@ -77,8 +77,11 @@ assert_shsl_equal '{}' "'{}" "empty quoted map"
 # do blocks
 # (newlines in bash are fucking weird bruh)
 assert_shsl_equal $'fuckyou\nnil' "(do (print 'fuck) (println 'you))" "do blocks"
-# assert_shsl_equal $'youfuck\nnil' "(do (print 'you) (println 'fuck))" "do blocks"
-# assert_shsl_equal $'fuck\nyou\nnil' "(do (println 'fuck) (println 'you))" "do blocks"
-# assert_shsl_equal $'you\nfuck\nnil' "(do (println 'you) (println 'fuck))" "do blocks"
+assert_shsl_equal $'youfuck\nnil' "(do (print 'you) (println 'fuck))" "do blocks"
+assert_shsl_equal $'fuck\nyou\nnil' "(do (println 'fuck) (println 'you))" "do blocks"
+assert_shsl_equal $'you\nfuck\nnil' "(do (println 'you) (println 'fuck))" "do blocks"
+
+# TODO: this should print 10000
+# (((fn [a] (fn [b] (a a b))) (fn [a] (* a a))) 10)
 
 echo "if you see this and nothing blew up then all tests pass!"

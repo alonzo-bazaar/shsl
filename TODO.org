@@ -4,13 +4,25 @@
 - [X] -e flag (was already implemented)
 - [ ] -r flag
 
-- [ ] debug why ~do_expr~ evaluation occasionally leads to a reference count below 0
+- [X] debug why ~do_expr~ evaluation occasionally leads to a reference count below 0
 
-- [ ] user functions (object)
-  - [ ] lambda list
+- [X] user functions (object)
+  - [X] lambda list
 - [ ] user functions (expression/parsing)
 
 - [ ] builtin functions
 - [ ] predicates (isnil, iscons, islist, iserr, isvec, ismap, et al.)
 - [ ] get
 - [ ] set
+
+- [ ] def
+- [ ] set
+- [ ] let
+
+* Hash maps (for env&Co.)
+- [ ] make the hash map use an actual hash function
+- [ ] open hash collision detection
+- [ ] rehashing for resizing
+- [ ] test the damn thing
+- [ ] add a map foreach macro
+
