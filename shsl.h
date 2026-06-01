@@ -108,7 +108,7 @@ void shsl_ref_set(shsl_ref* dst, shsl_ref src);
 // then the time comes when you're holding an object and are like 
 // idk if this has been bound to anything while I was using it
 // if it hasn't been bound to anything just burn it
-void shsl_ref_clean_if_dangling(shsl_ref ref);
+void shsl_ref_free_if_dangling(shsl_ref ref);
 
 /// DATA PREDICATES DECLARATIONS
 SHSL_OBJ_TYPE shsl_type(const shsl_ref ref);
@@ -631,7 +631,7 @@ void shsl_ref_set(shsl_ref* dst, shsl_ref src) {
     dst->ptr = src.ptr;
     dst->is_weak = src.is_weak;
 }
-void shsl_ref_clean_if_dangling(shsl_ref ref) {
+void shsl_ref_free_if_dangling(shsl_ref ref) {
     if(ref.ptr->ref_count == 0)
 	shsl_free(ref);
 }
@@ -1733,6 +1733,18 @@ typedef struct shsl_do_poking_expr {
     shsl_expr** body;
     size_t body_length;
 } shsl_do_poking_expr;
+typedef struct shsl_let_expr {
+    shsl_ref keys;
+    shsl_expr** vals;
+    size_t binds_length;
+    shsl_expr** body;
+    size_t body_length;
+} shsl_let_expr;
+typedef struct shsl_while_expr {
+    shsl_expr* condition;
+    shsl_expr** body;
+    size_t body_length;
+} shsl_while_expr;
 typedef struct shsl_def_expr {
     shsl_ref name;           // must be symbol
     shsl_expr* value;
@@ -1751,12 +1763,12 @@ typedef struct shsl_macro_expr {
     shsl_expr** body;
     shsl_expr** body_length;
 } shsl_macro_expr;
-
 typedef struct shsl_funcall_expr {
     shsl_expr* fn_expr;
     shsl_expr** args;
     size_t args_length;
 } shsl_funcall_expr;
+
 typedef struct shsl_expr {
     SHSL_EXPR_TYPE type;
     union {
@@ -1769,6 +1781,9 @@ typedef struct shsl_expr {
 	shsl_if_expr if_expr;
 	shsl_do_expr do_expr;
 	shsl_do_poking_expr do_poking_expr;
+	shsl_let_expr let_expr;
+	shsl_while_expr while_expr;
+
 	shsl_def_expr def_expr;
 	shsl_set_expr set_expr;
 
@@ -2015,7 +2030,99 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
 					.else_part = e
 				    });
 	    }
-	    
+	    else if(strcmp(s, "let") == 0) {
+		// (let [ <key val>* ] <body-exprs>*) 
+		if(!shsl_is_vec(shsl_nth(form, 1)))
+		    return shsl_expr_error
+			(form,
+			 "malformed let statement! bindings spec in let "
+			 "statement must be a vector!");
+
+		shsl_ref binds_vec = shsl_nth(form, 1);
+		size_t binds_length = shsl_vec_length(binds_vec);
+		if(binds_length%2 != 0)
+		    return shsl_expr_error
+			(form,
+			 "malformed let statement! bindings spec vector in let "
+			 "statement must have even length, provided vector has "
+			 "uneven length %zu!", binds_length);
+
+		for(size_t i = 0; i<shsl_vec_length(binds_vec); i+=2) {
+		    if(!shsl_is_sym(shsl_vec_get(binds_vec, i)))
+			return shsl_expr_error
+			    (form,
+			     "malformed let statement!"
+			     "all keys in bindings vector must be symbols!");
+		}
+
+		shsl_ref keys = shsl_mkvec(binds_length/2);
+		for(size_t i = 0; i<shsl_vec_length(binds_vec); i+=2)
+		    shsl_vec_push(keys,shsl_vec_get(binds_vec, i));
+
+		shsl_expr** vals = calloc(binds_length/2, sizeof(shsl_expr*)); 
+		for(size_t i = 1; i<shsl_vec_length(binds_vec); i+=2) {
+		    shsl_expr* next =
+			shsl_form_to_expr(shsl_vec_get(binds_vec, i));
+		    if(!shsl_expr_is_error(next))
+			vals[i/2] = next;
+		    else {
+			for(size_t j = 1; j<i; j+=2)
+			    shsl_expr_free(vals[i]);
+			free(vals);
+			return shsl_expr_further_error
+			    (next,
+			     "cannot parse let expression, malfomed value "
+			     "expression in bindings vector");
+		    }
+		}
+
+		shsl_expr** body = shsl_form_list_to_expr_arr(shsl_nthcdr(form, 2));
+		ssize_t  err_ind = shsl_expr_arr_find_err(body, form_length-2);
+		if(err_ind != -1) {
+		    shsl_expr* err_expr = body[err_ind];
+		    shsl_free_expr_arr(body, err_ind);
+		    shsl_free_expr_arr(vals, binds_length/2);
+		    shsl_free(keys);
+
+		    err_ind++; // use 1 based indexing for the error reporting 
+		    return shsl_expr_further_error
+			(err_expr,
+			 "cannot parse let expression, malformed subexpression "
+			 "in body at position %zu", (size_t)err_ind);
+		}
+		return_mallocd_expr
+		    (.type=SHSL_EXPR_LET,
+		     .let_expr = (shsl_let_expr) {
+			 .keys = keys,
+			 .vals = vals,
+			 .binds_length = binds_length,
+			 .body = body,
+			 .body_length = form_length - 2,
+		     });
+	    }
+	    else if(strcmp(s, "while") == 0) {
+		// (while <expr> <body-exprs>*)
+		shsl_expr* condition = shsl_form_to_expr(shsl_nth(form, 1));
+		if(shsl_expr_is_error(condition))
+		    return shsl_expr_further_error
+			(condition,
+			 "cannot parse while expression, malformed loop "
+			 "condition!");
+
+		shsl_expr** body = shsl_form_list_to_expr_arr(shsl_nthcdr(form, 2));
+		ssize_t  err_ind = shsl_expr_arr_find_err(body, form_length-2);
+		if(err_ind != -1) {
+		    shsl_expr* err_expr = body[err_ind];
+		    shsl_expr_free(condition);
+		    shsl_free_expr_arr(body, err_ind);
+		    err_ind++; // use 1 based indexing for the error reporting 
+		    return shsl_expr_further_error
+			(err_expr,
+			 "cannot parse while expression, malformed "
+			 "subexpression in body at position %zu",
+			 (size_t)err_ind);
+		}
+	    }
 	    else if(strcmp(s, "do") == 0) {
 		shsl_expr** body = shsl_form_list_to_expr_arr(shsl_cdr(form));
 		ssize_t  err_ind = shsl_expr_arr_find_err(body, form_length-1);
@@ -2372,10 +2479,42 @@ shsl_expr* shsl_expr_copy(shsl_expr* orig) {
                 .body_length = body_length,
              });
     }
-    case SHSL_EXPR_LET:
-        assert(0 && "TODO: copy let expression");
-    case SHSL_EXPR_WHILE:
-        assert(0 && "TODO: copy while expression");
+    case SHSL_EXPR_LET: {
+        size_t body_length = orig->let_expr.body_length;
+        shsl_expr** body = calloc(body_length, sizeof(shsl_expr*));
+        for(size_t i = 0; i<body_length; ++i)
+            body[i] = shsl_expr_copy(orig->let_expr.body[i]);
+
+        size_t binds_length = orig->let_expr.binds_length;
+        shsl_expr** vals = calloc(binds_length, sizeof(shsl_expr*));
+        for(size_t i = 0; i<binds_length; ++i)
+            vals[i] = shsl_expr_copy(orig->let_expr.vals[i]);
+
+	return_mallocd_expr
+	    (.type = SHSL_EXPR_LET,
+	     .let_expr = (shsl_let_expr) {
+		 .keys = shsl_copy(orig->let_expr.keys),
+		 .vals = vals,
+		 .binds_length = binds_length,
+		 .body = body,
+		 .body_length = body_length,
+	     });
+    }
+
+    case SHSL_EXPR_WHILE: {
+        size_t body_length = orig->while_expr.body_length;
+        shsl_expr** body = calloc(body_length, sizeof(shsl_expr*));
+        for(size_t i = 0; i<body_length; ++i)
+            body[i] = shsl_expr_copy(orig->while_expr.body[i]);
+
+	return_mallocd_expr
+	    (.type = SHSL_EXPR_WHILE,
+	     .while_expr = (shsl_while_expr) {
+		 .condition = shsl_expr_copy(orig->while_expr.condition),
+		 .body = body,
+		 .body_length = body_length,
+	     });
+    }
     case SHSL_EXPR_DEF:
         return_mallocd_expr
 	    (.type = SHSL_EXPR_DEF,
@@ -2505,7 +2644,7 @@ shsl_ref shsl_eval_sequence(shsl_expr** seq, size_t seq_length, shsl_ref env) {
 	return shsl_ref_to_nil();
 
     for(size_t i = 0; i<seq_length-1; ++i)
-	shsl_ref_clean_if_dangling(shsl_eval(seq[i], env));
+	shsl_ref_free_if_dangling(shsl_eval(seq[i], env));
     shsl_ref res = shsl_eval(seq[seq_length-1], env);
     return res;
 }
@@ -2542,7 +2681,7 @@ shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
 	    res=shsl_eval(expr->if_expr.then_part, env);
 	else
 	    res=shsl_eval(expr->if_expr.else_part, env);
-	shsl_ref_clean_if_dangling(c);
+	shsl_ref_free_if_dangling(c);
 	return res;
     }
     case SHSL_EXPR_DO: {
@@ -2560,8 +2699,7 @@ shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
     }
 
     case SHSL_EXPR_FUNCALL: {
-	shsl_ref fn = shsl_ref_add
-            (shsl_eval(expr->funcall_expr.fn_expr, env));
+	shsl_ref fn = shsl_eval(expr->funcall_expr.fn_expr, env);
         shsl_ref args = shsl_eval_many_into_vec
             (expr->funcall_expr.args,
              expr->funcall_expr.args_length,
@@ -2570,7 +2708,7 @@ shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
 	case SHSL_BUILTIN_FN: {
 	    shsl_ref res = fn.ptr->builtin_fn.apply
                 (args, fn.ptr->builtin_fn.env);
-            shsl_ref_del(fn);
+            shsl_ref_free_if_dangling(fn);
 	    shsl_free(args);
 	    return res;
 	}
@@ -2583,12 +2721,11 @@ shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
                 shsl_mkcons
                 (shsl_env_mkframe(fn.ptr->user_fn.lambda_list->positional, args),
                  env);
-            shsl_ref_add(inner_env);
             shsl_ref res = shsl_eval_sequence(fn.ptr->user_fn.body,
 					      fn.ptr->user_fn.body_length,
 					      env);
-            shsl_ref_del(inner_env);
-            shsl_ref_del(fn);
+	    shsl_ref_free_if_dangling(inner_env);
+            shsl_ref_free_if_dangling(fn);
 	    shsl_free(args);
             return res;
         }
@@ -2634,11 +2771,34 @@ shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
 			    expr->def_expr.name,
 			    shsl_eval(expr->def_expr.value, env));
 
-    case SHSL_EXPR_WHILE:
-    case SHSL_EXPR_LET:
+    case SHSL_EXPR_WHILE: {
+	shsl_ref loop_condition = shsl_eval(expr->while_expr.condition, env);
+	shsl_ref res = shsl_ref_to_nil();
+	while(shsl_is_truthy(loop_condition)) {
+	    shsl_ref_free_if_dangling(res);
+	    res = shsl_eval_sequence(expr->while_expr.body,
+				     expr->while_expr.body_length,
+				     env);
+	    shsl_ref_free_if_dangling(loop_condition);
+	    loop_condition = shsl_eval(expr->while_expr.condition, env);
+	}
+	return res;
+    }
+    case SHSL_EXPR_LET: {
+        shsl_ref vals = shsl_eval_many_into_vec
+            (expr->let_expr.vals,
+             expr->let_expr.binds_length,
+             env);
+	shsl_ref inner_env =
+	    shsl_mkcons(shsl_env_mkframe(expr->let_expr.keys, vals), env);
+	shsl_ref res = shsl_eval_sequence(expr->let_expr.body,
+					  expr->let_expr.body_length,
+					  env);
+	shsl_ref_free_if_dangling(inner_env);
+	return res;
+    }
     case SHSL_EXPR_MACRO:
         assert(0 && "TODO eval this kind of expression");
-
     }
     assert(0 && "unreachable");
 }
