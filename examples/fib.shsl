@@ -1,0 +1,13 @@
+(println "the syntax highlighting is because I'm stealing clojure support")
+
+(def fib (fn [a]
+           (if (< a 0) (err "what the fuck bro")
+               (if (<= a 1)
+                 1
+                 (+ (fib (- a 1)) (fib (- a 2)))))))
+
+(let [i 0]
+  (while (< i 10)
+    (println "(fib" i ") =" (fib i))
+    (set i (+ i 1))))
+

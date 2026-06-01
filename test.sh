@@ -85,7 +85,31 @@ assert_shsl_equal $'youfuck\nnil' "(do (print 'you) (println 'fuck))" "do blocks
 assert_shsl_equal $'fuck\nyou\nnil' "(do (println 'fuck) (println 'you))" "do blocks"
 assert_shsl_equal $'you\nfuck\nnil' "(do (println 'you) (println 'fuck))" "do blocks"
 
+# let blocks
+assert_shsl_equal '10' "(def a 10) (let [a [1 2 3]] a) a"
+assert_shsl_equal '[1, 2, 3]' "(def a [1 2 3]) (let [a 10] a) a"
+
+# builtin funs
+assert_shsl_equal 'nil' "(> 10 20)"
+assert_shsl_equal 't' "(< 10 20)"
+assert_shsl_equal 'nil' "(>= 10 20)"
+assert_shsl_equal 't' "(<= 10 20)"
+
+assert_shsl_equal 't' "(isnil nil)"
+assert_shsl_equal 't' "(isnil '())"
+assert_shsl_equal 'nil' "(isnil t)"
+
+assert_shsl_equal 't' "(issym t)"
+assert_shsl_equal 't' "(issym 'hello)"
+assert_shsl_equal 'nil' "(issym 'nil)"
+assert_shsl_equal 'nil' "(issym 10)"
+
+assert_shsl_equal '(a b)' "(cons 'a (cons 'b nil))"
 # TODO: this should print 10000
+# check how are we doing function fuckery, qualquadra non cosa
 # (((fn [a] (fn [b] (a a b))) (fn [a] (* a a))) 10)
+# TODO:
+# this prints a at the end for some fucking reason
+# "(let [a 0] (while (< a 10) (println a) (set a (+ a 1))))"
 
 echo "if you see this and nothing blew up then all tests pass!"
