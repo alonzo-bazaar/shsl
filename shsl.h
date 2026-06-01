@@ -33,7 +33,7 @@ typedef enum SHSL_OBJ_TYPE {
     // atoms
     // nil first so an object initialized as {0} is nil
     SHSL_NIL = 0, SHSL_SYM, 
-    SHSL_INT, SHSL_REAL, SHSL_STRING,
+    SHSL_INT, SHSL_REAL, SHSL_STR,
 
     // collections
     SHSL_CONS, SHSL_VEC, SHSL_MAP,
@@ -114,6 +114,7 @@ void shsl_ref_free_if_dangling(shsl_ref ref);
 SHSL_OBJ_TYPE shsl_type(const shsl_ref ref);
 bool shsl_is_nil(const shsl_ref ref);
 bool shsl_is_sym(const shsl_ref ref);
+bool shsl_is_str(const shsl_ref ref);
 bool shsl_is_int(const shsl_ref ref);
 bool shsl_is_real(const shsl_ref ref);
 bool shsl_is_num(const shsl_ref ref);
@@ -402,6 +403,11 @@ shsl_ref shsl_builtin_sub(shsl_ref args, shsl_ref env);
 shsl_ref shsl_builtin_mul(shsl_ref args, shsl_ref env);
 shsl_ref shsl_builtin_div(shsl_ref args, shsl_ref env);
 
+shsl_ref shsl_builtin_gt(shsl_ref args, shsl_ref env);
+shsl_ref shsl_builtin_lt(shsl_ref args, shsl_ref env);
+shsl_ref shsl_builtin_ge(shsl_ref args, shsl_ref env);
+shsl_ref shsl_builtin_le(shsl_ref args, shsl_ref env);
+
 /// SHSL BUILTIN DATA FUNCTIONS DECLARATIONS
 shsl_ref shsl_builtin_isnil(shsl_ref args, shsl_ref env);
 
@@ -418,9 +424,12 @@ shsl_ref shsl_builtin_isvec(shsl_ref args, shsl_ref env);
 shsl_ref shsl_builtin_ismap(shsl_ref args, shsl_ref env);
 shsl_ref shsl_builtin_islist(shsl_ref args, shsl_ref env);
 
-shsl_ref shsl_builtin_isfun(shsl_ref args, shsl_ref env);
+shsl_ref shsl_builtin_isfn(shsl_ref args, shsl_ref env);
 shsl_ref shsl_builtin_ismacro(shsl_ref args, shsl_ref env);
 
+shsl_ref shsl_builtin_err(shsl_ref args, shsl_ref env);
+
+shsl_ref shsl_builtin_cons(shsl_ref args, shsl_ref env);
 shsl_ref shsl_builtin_car(shsl_ref args, shsl_ref env);
 shsl_ref shsl_builtin_cdr(shsl_ref args, shsl_ref env);
 shsl_ref shsl_builtin_nth(shsl_ref args, shsl_ref env);
@@ -431,11 +440,14 @@ shsl_ref shsl_builtin_vecset(shsl_ref args, shsl_ref env);
 shsl_ref shsl_builtin_vecpush(shsl_ref args, shsl_ref env);
 shsl_ref shsl_builtin_veclen(shsl_ref args, shsl_ref env);
 
+// TODO: for when I get destructuring set to work
+// mapget should return a pair/length 2 vector/whatever [value  foundp]
 shsl_ref shsl_builtin_mapget(shsl_ref args, shsl_ref env);
+// [value was-alread-present-p] ?
 shsl_ref shsl_builtin_mapset(shsl_ref args, shsl_ref env);
-shsl_ref shsl_builtin_maphas(shsl_ref args, shsl_ref env);
 
 /// SHSL BUILTIN OTHER FUNCTIONS DECLARATIONS
+shsl_ref shsl_builtin_equal(shsl_ref args, shsl_ref env);
 shsl_ref shsl_builtin_pr(shsl_ref args, shsl_ref env);
 shsl_ref shsl_builtin_prn(shsl_ref args, shsl_ref env);
 shsl_ref shsl_builtin_print(shsl_ref args, shsl_ref env);
@@ -646,6 +658,9 @@ bool shsl_is_nil(const shsl_ref ref) {
 bool shsl_is_sym(const shsl_ref ref) {
     return shsl_type(ref) == SHSL_SYM;
 }
+bool shsl_is_str(const shsl_ref ref) {
+    return shsl_type(ref) == SHSL_STR;
+}
 bool shsl_is_int(const shsl_ref ref) {
     return shsl_type(ref) == SHSL_INT;
 }
@@ -737,7 +752,7 @@ shsl_ref shsl_mkstr(const char* str) {
     size_t len = strlen(str);
     char* c = calloc(len+1, sizeof(char));
     strcpy(c, str);
-    return_mallocd_obj(.ref_count = 0, .type = SHSL_STRING, .str = c);
+    return_mallocd_obj(.ref_count = 0, .type = SHSL_STR, .str = c);
 }
 shsl_ref shsl_mksym(const char* name) {
     return_mallocd_obj(.ref_count = 0,
@@ -875,7 +890,7 @@ shsl_ref shsl_copy(shsl_ref ref) {
     case SHSL_SYM:    return shsl_mksym(ref.ptr->sym.name.ptr->str);
     case SHSL_INT:    return shsl_mkint(ref.ptr->i);
     case SHSL_REAL:   return shsl_mkint(ref.ptr->r);
-    case SHSL_STRING: return shsl_mkstr(ref.ptr->str);
+    case SHSL_STR: return shsl_mkstr(ref.ptr->str);
 
     case SHSL_ERR:    return shsl_mkerr(shsl_copy(ref.ptr->err.data),
 						  ref.ptr->err.msg.ptr->str);
@@ -920,7 +935,7 @@ void shsl_free(shsl_ref ref) {
 	// fprintf(stderr, "cannot free NIL! You fucked something up!\n");
 	break;
 
-    case SHSL_STRING:
+    case SHSL_STR:
 	free(ref.ptr->str);
 	free(ref.ptr);
 	break;
@@ -1019,7 +1034,7 @@ bool shsl_eq(shsl_ref lhs_ref, shsl_ref rhs_ref) {
 	return lhs->i == rhs->i;
     case SHSL_REAL:
 	return lhs->r == rhs->r;
-    case SHSL_STRING:
+    case SHSL_STR:
 	return strcmp(lhs->str, rhs->str) == 0;
 
     case SHSL_CONS:
@@ -1878,7 +1893,7 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
     switch(form.ptr->type) {
     case SHSL_INT:
     case SHSL_REAL:
-    case SHSL_STRING:
+    case SHSL_STR:
     case SHSL_NIL:
 	return_mallocd_expr(.type = SHSL_EXPR_LITERAL,
 			    .literal = shsl_ref_add(form));
@@ -2093,9 +2108,9 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
 		return_mallocd_expr
 		    (.type=SHSL_EXPR_LET,
 		     .let_expr = (shsl_let_expr) {
-			 .keys = keys,
+			 .keys = shsl_ref_add(keys),
 			 .vals = vals,
-			 .binds_length = binds_length,
+			 .binds_length = binds_length/2,
 			 .body = body,
 			 .body_length = form_length - 2,
 		     });
@@ -2359,10 +2374,15 @@ void shsl_expr_free(shsl_expr* expr) {
 	free(expr);
 	break;
     case SHSL_EXPR_LET:
-	assert(0 && "TODO: free let expr");
+	shsl_ref_del(expr->let_expr.keys);
+	shsl_free_expr_arr(expr->let_expr.vals, expr->let_expr.binds_length);
+	shsl_free_expr_arr(expr->let_expr.body, expr->let_expr.body_length);
+	free(expr);
 	break;
     case SHSL_EXPR_WHILE:
-	assert(0 && "TODO: free while expr");
+	shsl_expr_free(expr->while_expr.condition);
+	shsl_free_expr_arr(expr->while_expr.body, expr->while_expr.body_length);
+	free(expr);
 	break;
     case SHSL_EXPR_DEF:
 	shsl_ref_del(expr->def_expr.name);
@@ -2637,8 +2657,6 @@ shsl_ref shsl_env_def(shsl_ref env, shsl_ref key, shsl_ref new_val) {
     return key;
 }
 
-// #define shsl_eval_return(thing) do { shsl_ref_set(&it, thing); return thing; } while(0)
-#define shsl_eval_return(thing) return(thing)
 shsl_ref shsl_eval_sequence(shsl_expr** seq, size_t seq_length, shsl_ref env) {
     if(seq_length == 0)
 	return shsl_ref_to_nil();
@@ -2793,7 +2811,7 @@ shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
 	    shsl_mkcons(shsl_env_mkframe(expr->let_expr.keys, vals), env);
 	shsl_ref res = shsl_eval_sequence(expr->let_expr.body,
 					  expr->let_expr.body_length,
-					  env);
+					  inner_env);
 	shsl_ref_free_if_dangling(inner_env);
 	return res;
     }
@@ -2819,30 +2837,34 @@ shsl_ref shsl_eval_many_into_vec(shsl_expr** args, size_t args_length,
     shsl_ref c_name(shsl_ref args_name, shsl_ref env_name)		\
     {									\
 	const char* shsl_fn_name = shsl_name;	/* used by macros */	\
-	shsl_fn_assert_vec((args_name));				\
+	shsl_ref shsl_fn_args = args_name; /* same as above */		\
+	shsl_fn_assert_vec(shsl_fn_args);				\
 	do __VA_ARGS__ while(0);					\
     }									
+#define shsl_fn_arg(i) shsl_vec_get(shsl_fn_args, i)
+#define shsl_fn_argslen() shsl_vec_length(shsl_fn_args)
 #define shsl_fn_assert(ass) do {				\
 	if(!(ass))						\
 	    return shsl_mkerr(shsl_ref_to_nil(),		\
 			      "in function %s, assertion "	\
 			      #ass "failed!", shsl_fn_name);	\
     } while(0)
+
 #define shsl_fn_assert_vec(args)		\
     shsl_fn_assert(shsl_is_vec(args))
-#define shsl_fn_assert_size(args, pred)		\
-    shsl_fn_assert((shsl_vec_length(args)) pred)
-#define shsl_fn_assert_type(args, i, t)			\
-    shsl_fn_assert(shsl_vec_get(args, i).ptr->type == (t))
-#define shsl_fn_assert_type_either(args, i, t1, t2)		\
-    shsl_fn_assert(shsl_vec_get(args, i).ptr->type == (t1) ||	\
-		    shsl_vec_get(args, i).ptr->type == (t2))
+#define shsl_fn_assert_argslen(pred)				\
+    shsl_fn_assert((shsl_vec_length(shsl_fn_args)) pred)
+#define shsl_fn_assert_argtype(i, t)					\
+    shsl_fn_assert(shsl_type(shsl_vec_get(shsl_fn_args, i)) == t)
+#define shsl_fn_assert_argtype_either(i, t1, t2)			\
+    shsl_fn_assert(shsl_type(shsl_vec_get(shsl_fn_args, i)) == t1 ||	\
+		   shsl_type(shsl_vec_get(shsl_fn_args, i)) == t2)
 
 /// SHSL BUILTIN ARITHMETIC FUNCTIONS DEFINITIONS
 shsl_defun(shsl_builtin_add, "+", args, env, {
 	(void)env;
 	shsl_vec_foreach(i, elt, args)
-	    shsl_fn_assert_type_either(args, i, SHSL_INT, SHSL_REAL);
+	    shsl_fn_assert_argtype_either(i, SHSL_INT, SHSL_REAL);
 
 	long intsum = 0;
 	double realsum = 0.0;
@@ -2861,30 +2883,30 @@ shsl_defun(shsl_builtin_add, "+", args, env, {
 shsl_defun(shsl_builtin_sub, "-", args, env, {
 	(void)env;
 	shsl_vec_foreach(i, elt, args)
-	    shsl_fn_assert_type_either(args, i, SHSL_INT, SHSL_REAL);
+	    shsl_fn_assert_argtype_either(i, SHSL_INT, SHSL_REAL);
 
-	switch(shsl_vec_length(args)) {
+	switch(shsl_fn_argslen()) {
 	case 0:
 	    return shsl_mkint(0);
 	case 1:
-	    return shsl_copy(shsl_vec_get(args, 0));
+	    return shsl_copy(shsl_fn_arg(0));
 	default: {
 	    long intdiff = 0;
 	    double realdiff;
-	    if(!shsl_is_int(shsl_vec_get(args, 0)))
+	    if(!shsl_is_int(shsl_fn_arg(0)))
 		goto realdiff;
-	    intdiff = shsl_int(shsl_vec_get(args, 0));
-	    for(size_t i = 1; i<shsl_vec_length(args); ++i)
-		if(!shsl_is_int(shsl_vec_get(args, i)))
+	    intdiff = shsl_int(shsl_fn_arg(0));
+	    for(size_t i = 1; i<shsl_fn_argslen(); ++i)
+		if(!shsl_is_int(shsl_fn_arg(i)))
 		    goto realdiff;
 		else
-		    intdiff -= shsl_int(shsl_vec_get(args, i));
+		    intdiff -= shsl_int(shsl_fn_arg(i));
 	    return shsl_mkint(intdiff);
 
 	    realdiff:
-	    realdiff = shsl_real(shsl_vec_get(args, 0));
-	    for(size_t i = 1; i<shsl_vec_length(args); ++i)
-		realdiff -= shsl_real(shsl_vec_get(args, i)); 
+	    realdiff = shsl_real(shsl_fn_arg(0));
+	    for(size_t i = 1; i<shsl_fn_argslen(); ++i)
+		realdiff -= shsl_real(shsl_fn_arg(i)); 
 	    return shsl_mkreal(realdiff);
 	}
 	}
@@ -2892,7 +2914,7 @@ shsl_defun(shsl_builtin_sub, "-", args, env, {
 shsl_defun(shsl_builtin_mul, "*", args, env, {
 	(void)env;
 	shsl_vec_foreach(i, elt, args)
-	    shsl_fn_assert_type_either(args, i, SHSL_INT, SHSL_REAL);
+	    shsl_fn_assert_argtype_either(i, SHSL_INT, SHSL_REAL);
 
 	long intprod = 1;
 	double realprod = 1.0;
@@ -2910,36 +2932,257 @@ shsl_defun(shsl_builtin_mul, "*", args, env, {
     })
 shsl_defun(shsl_builtin_div, "/", args, env, {
 	(void)env;
-	shsl_fn_assert_size(args, == 2);
-	shsl_fn_assert_type_either(args, 0, SHSL_INT, SHSL_REAL);
-	shsl_fn_assert_type_either(args, 1, SHSL_INT, SHSL_REAL);
+	shsl_fn_assert_argslen(== 2);
+	shsl_fn_assert_argtype_either(0, SHSL_INT, SHSL_REAL);
+	shsl_fn_assert_argtype_either(1, SHSL_INT, SHSL_REAL);
 
 	// handle case where it returns integer
-	if(shsl_is_int(shsl_vec_get(args, 0))
-	   && shsl_is_int(shsl_vec_get(args, 1))
-	   && shsl_int(shsl_vec_get(args, 1)) != 0
-	   && ((shsl_int(shsl_vec_get(args, 1))
-		% shsl_int(shsl_vec_get(args, 1))) == 0))
-	    return shsl_mkint(shsl_int(shsl_vec_get(args, 0))
-			      / shsl_int(shsl_vec_get(args, 1)));
+	if(shsl_is_int(shsl_fn_arg(0))
+	   && shsl_is_int(shsl_fn_arg(1))
+	   && shsl_int(shsl_fn_arg(0)) != 0
+	   && ((shsl_int(shsl_fn_arg(1))
+		% shsl_int(shsl_fn_arg(0))) == 0))
+	    return shsl_mkint(shsl_int(shsl_fn_arg(0))
+			      / shsl_int(shsl_fn_arg(1)));
 
-	double a = shsl_real(shsl_vec_get(args, 0));
-	double b = shsl_real(shsl_vec_get(args, 1));
+	double a = shsl_real(shsl_fn_arg(0));
+	double b = shsl_real(shsl_fn_arg(1));
 	if(b == 0.0)
 	    return shsl_mkerr(args, "in function /: division by zero!");
 	return shsl_mkreal(a/b);
     })
 
+#define shsl_bool_to_obj(...) ((__VA_ARGS__)?shsl_mksym("t"):shsl_ref_to_nil())
+shsl_defun(shsl_builtin_gt, ">", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(== 2);
+	shsl_fn_assert_argtype_either(0, SHSL_INT, SHSL_REAL);
+	shsl_fn_assert_argtype_either(1, SHSL_INT, SHSL_REAL);
+
+	if(shsl_is_int(shsl_fn_arg(0)) && shsl_real(shsl_fn_arg(1)))
+	    return shsl_bool_to_obj
+		(shsl_int(shsl_fn_arg(0)) > shsl_int(shsl_fn_arg(1)));
+	return shsl_bool_to_obj
+	    (shsl_real(shsl_fn_arg(0)) > shsl_real(shsl_fn_arg(1)));
+    })
+shsl_defun(shsl_builtin_lt, "<", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(== 2);
+	shsl_fn_assert_argtype_either(0, SHSL_INT, SHSL_REAL);
+	shsl_fn_assert_argtype_either(1, SHSL_INT, SHSL_REAL);
+
+	if(shsl_is_int(shsl_fn_arg(0)) && shsl_real(shsl_fn_arg(1)))
+	    return shsl_bool_to_obj
+		(shsl_int(shsl_fn_arg(0)) < shsl_int(shsl_fn_arg(1)));
+	return shsl_bool_to_obj
+	    (shsl_real(shsl_fn_arg(0)) < shsl_real(shsl_fn_arg(1)));
+    })
+shsl_defun(shsl_builtin_ge, ">=", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(== 2);
+	shsl_fn_assert_argtype_either(0, SHSL_INT, SHSL_REAL);
+	shsl_fn_assert_argtype_either(1, SHSL_INT, SHSL_REAL);
+
+	if(shsl_is_int(shsl_fn_arg(0)) && shsl_real(shsl_fn_arg(1)))
+	    return shsl_bool_to_obj
+		(shsl_int(shsl_fn_arg(0)) >= shsl_int(shsl_fn_arg(1)));
+	return shsl_bool_to_obj
+	    (shsl_real(shsl_fn_arg(0)) >= shsl_real(shsl_fn_arg(1)));
+    })
+shsl_defun(shsl_builtin_le, "<=", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(== 2);
+	shsl_fn_assert_argtype_either(0, SHSL_INT, SHSL_REAL);
+	shsl_fn_assert_argtype_either(1, SHSL_INT, SHSL_REAL);
+
+	if(shsl_is_int(shsl_fn_arg(0)) && shsl_real(shsl_fn_arg(1)))
+	    return shsl_bool_to_obj
+		(shsl_int(shsl_fn_arg(0)) <= shsl_int(shsl_fn_arg(1)));
+	return shsl_bool_to_obj
+	    (shsl_real(shsl_fn_arg(0)) <= shsl_real(shsl_fn_arg(1)));
+    })
+
 /// SHSL BUILTIN DATA FUNCTIONS DEFINITIONS
+shsl_defun(shsl_builtin_isnil, "isnil", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(== 1);
+	return shsl_bool_to_obj(shsl_is_nil(shsl_fn_arg(0)));
+    })
+shsl_defun(shsl_builtin_isint, "isint", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(== 1);
+	return shsl_bool_to_obj(shsl_is_int(shsl_fn_arg(0)));
+    })
+shsl_defun(shsl_builtin_isreal, "isreal", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(== 1);
+	return shsl_bool_to_obj(shsl_is_real(shsl_fn_arg(0)));
+    })
+shsl_defun(shsl_builtin_isnum, "isnum", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(== 1);
+	return shsl_bool_to_obj(shsl_is_num(shsl_fn_arg(0)));
+    })
+shsl_defun(shsl_builtin_issym, "issym", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(== 1);
+	return shsl_bool_to_obj(shsl_is_sym(shsl_fn_arg(0)));
+    })
+shsl_defun(shsl_builtin_isstr, "isstr", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(== 1);
+	return shsl_bool_to_obj(shsl_is_str(shsl_fn_arg(0)));
+    })
+shsl_defun(shsl_builtin_iserr, "iserr", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(== 1);
+	return shsl_bool_to_obj(shsl_is_err(shsl_fn_arg(0)));
+    })
+shsl_defun(shsl_builtin_iscons, "iscons", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(== 1);
+	return shsl_bool_to_obj(shsl_is_cons(shsl_fn_arg(0)));
+    })
+shsl_defun(shsl_builtin_isvec, "isvec", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(== 1);
+	return shsl_bool_to_obj(shsl_is_vec(shsl_fn_arg(0)));
+    })
+shsl_defun(shsl_builtin_ismap, "ismap", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(== 1);
+	return shsl_bool_to_obj(shsl_is_map(shsl_fn_arg(0)));
+    })
+shsl_defun(shsl_builtin_islist, "islist", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(== 1);
+	return shsl_bool_to_obj(shsl_is_list(shsl_fn_arg(0)));
+    })
+shsl_defun(shsl_builtin_isfn, "isfn", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(== 1);
+	return shsl_bool_to_obj(shsl_is_fn(shsl_fn_arg(0)));
+    })
+shsl_defun(shsl_builtin_ismacro, "ismacro", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(== 1);
+	return shsl_bool_to_obj(shsl_is_macro(shsl_fn_arg(0)));
+    })
+
+shsl_defun(shsl_builtin_err, "err", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(>= 1);
+	shsl_fn_assert_argtype(0, SHSL_STR);
+
+	shsl_cb rest_builder = shsl_cb_make(SHSL_CB_LIST);
+	for(size_t i = 1; i<shsl_fn_argslen(); ++i)
+	    shsl_cb_add(&rest_builder, shsl_fn_arg(i));
+
+	return shsl_mkerr(shsl_cb_get(rest_builder), shsl_fn_arg(0).ptr->str);
+    })
+
+shsl_defun(shsl_builtin_cons, "cons", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(== 2);
+	return shsl_mkcons(shsl_fn_arg(0), shsl_fn_arg(1));
+    })
+shsl_defun(shsl_builtin_car, "car", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(== 1);
+	return shsl_car(shsl_fn_arg(0));
+    })
+shsl_defun(shsl_builtin_cdr, "cdr", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(== 1);
+	return shsl_cdr(shsl_fn_arg(0));
+    })
+shsl_defun(shsl_builtin_nth, "nth", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(== 2);
+	shsl_fn_assert_argtype_either(0, SHSL_CONS, SHSL_NIL);
+	shsl_fn_assert_argtype(1, SHSL_INT);
+
+	return shsl_nth(shsl_fn_arg(0),
+			shsl_int(shsl_fn_arg(1)));
+    })
+shsl_defun(shsl_builtin_nthcdr, "nthcdr", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(== 1);
+	shsl_fn_assert_argtype_either(0, SHSL_CONS, SHSL_NIL);
+	shsl_fn_assert_argtype(1, SHSL_INT);
+
+	return shsl_nthcdr(shsl_fn_arg(0),
+			   shsl_int(shsl_fn_arg(1)));
+    })
+
 shsl_defun(shsl_builtin_vecget, "vecget", args, env, {
 	(void)env;
-	shsl_fn_assert_size(args, == 2);
-	shsl_fn_assert_type(args, 0, SHSL_VEC);
-	shsl_fn_assert_type(args, 1, SHSL_INT);
-	return shsl_vec_get(args, (size_t)shsl_vec_get(args, 1).ptr->i);
+	shsl_fn_assert_argslen(== 2);
+	shsl_fn_assert_argtype(0, SHSL_VEC);
+	shsl_fn_assert_argtype(1, SHSL_INT);
+
+	shsl_ref vec = shsl_fn_arg(0);
+	shsl_ref ind = shsl_fn_arg(1);
+	if((size_t)shsl_int(ind) >= shsl_vec_length(vec))
+	    return shsl_mkerr
+		(ind, "in funciton vecget: vector out of bounds read!");
+	return shsl_vec_get(vec, (size_t)shsl_int(ind));
+    })
+shsl_defun(shsl_builtin_vecset, "vecset", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(== 2);
+	shsl_fn_assert_argtype(0, SHSL_VEC);
+	shsl_fn_assert_argtype(1, SHSL_INT);
+
+	shsl_ref vec = shsl_fn_arg(0);
+	shsl_ref ind = shsl_fn_arg(1);
+	if((size_t)shsl_int(ind) >= shsl_vec_length(vec))
+	    return shsl_mkerr
+		(ind, "in function vecset: vector out of bounds write!");
+
+	return vec;
+    })
+shsl_defun(shsl_builtin_vecpush, "vecpush", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(== 2);
+	shsl_fn_assert_argtype(0, SHSL_VEC);
+
+	shsl_ref vec = shsl_fn_arg(0);
+	shsl_vec_push(vec, shsl_fn_arg(1));
+	return vec;
+    })
+shsl_defun(shsl_builtin_veclen, "veclen", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(== 1);
+	shsl_fn_assert_argtype(0, SHSL_VEC);
+
+	return shsl_mkint((long)shsl_vec_length(shsl_fn_arg(0)));
+    })
+
+shsl_defun(shsl_builtin_mapget, "mapget", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(== 2);
+	shsl_fn_assert_argtype(0, SHSL_MAP);
+	// TODO: assert key is hashable
+
+	return shsl_map_get(shsl_fn_arg(0), shsl_fn_arg(1));
+    })
+shsl_defun(shsl_builtin_mapset, "mapset", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(== 3);
+	shsl_fn_assert_argtype(0, SHSL_MAP);
+
+	shsl_map_set(shsl_fn_arg(0), shsl_fn_arg(1), shsl_fn_arg(2));
+	return shsl_fn_arg(0);
     })
 
 /// SHSL BUILTIN OTHER FUNCTIONS DEFINITIONS
+shsl_defun(shsl_builtin_equal, "==", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(== 2);
+	return shsl_bool_to_obj(shsl_eq(shsl_fn_arg(0), shsl_fn_arg(1)));
+    })
+
 shsl_defun(shsl_builtin_print, "print", args, env, {
 	(void)env;
 	shsl_vec_foreach(i, elt, args) {
@@ -2966,8 +3209,6 @@ shsl_ref shsl_make_initial_env(void) {
     shsl_map_set(frame_obj, t, t); // t is self evaluating
 
     // arithmetic operations 
-    // + - * / > < >= <=
-    // I might make == generic compairison (a synonim for eq/equal)
     shsl_map_set(frame_obj, shsl_mksym("+"),
 		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_add));
     shsl_map_set(frame_obj, shsl_mksym("-"),
@@ -2977,27 +3218,82 @@ shsl_ref shsl_make_initial_env(void) {
     shsl_map_set(frame_obj, shsl_mksym("/"),
 		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_div));
 
+    shsl_map_set(frame_obj, shsl_mksym(">"),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_gt));
+    shsl_map_set(frame_obj, shsl_mksym("<"),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_lt));
+    shsl_map_set(frame_obj, shsl_mksym(">="),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_ge));
+    shsl_map_set(frame_obj, shsl_mksym("<="),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_le));
+
+    // data predicates
+    shsl_map_set(frame_obj, shsl_mksym("isnil"),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_isnil));
+    shsl_map_set(frame_obj, shsl_mksym("isint"),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_isint));
+    shsl_map_set(frame_obj, shsl_mksym("isreal"),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_isreal));
+    shsl_map_set(frame_obj, shsl_mksym("issym"),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_issym));
+    shsl_map_set(frame_obj, shsl_mksym("isstr"),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_isstr));
+    shsl_map_set(frame_obj, shsl_mksym("iserr"),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_iserr));
+    shsl_map_set(frame_obj, shsl_mksym("iscons"),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_iscons));
+    shsl_map_set(frame_obj, shsl_mksym("isvec"),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_isvec));
+    shsl_map_set(frame_obj, shsl_mksym("ismap"),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_ismap));
+    shsl_map_set(frame_obj, shsl_mksym("islist"),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_islist));
+
+    shsl_map_set(frame_obj, shsl_mksym("isfn"),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_isfn));
+    shsl_map_set(frame_obj, shsl_mksym("ismacro"),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_ismacro));
+
     // list operations
-    // isnil, cons, iscons, list, islist, isproper, car, cdr, null
+    // isproper, null
+    shsl_map_set(frame_obj, shsl_mksym("cons"),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_cons));
+    shsl_map_set(frame_obj, shsl_mksym("car"),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_car));
+    shsl_map_set(frame_obj, shsl_mksym("cdr"),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_cdr));
 
     // vector operations
-    // isvec, vecget, vecset, veclen
+    shsl_map_set(frame_obj, shsl_mksym("vecget"),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_vecget));
+    shsl_map_set(frame_obj, shsl_mksym("vecset"),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_vecset));
+    shsl_map_set(frame_obj, shsl_mksym("veclen"),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_veclen));
+    shsl_map_set(frame_obj, shsl_mksym("vecpush"),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_vecpush));
 
     // map operations
-    // ismap, mapget, mapset, maphas
+    shsl_map_set(frame_obj, shsl_mksym("mapget"),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_mapget));
+    shsl_map_set(frame_obj, shsl_mksym("mapset"),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_mapset));
 
     // error functions
-    // iserror, error
+    shsl_map_set(frame_obj, shsl_mksym("err"),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_err));
 
     // collection operations
     // map, filter, reduce
 
     // other functions
-    // print... mostly print
+    shsl_map_set(frame_obj, shsl_mksym("=="),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_equal));
     shsl_map_set(frame_obj, shsl_mksym("print"),
 		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_print));
     shsl_map_set(frame_obj, shsl_mksym("println"),
 		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_println));
+
     // introspection functions
     // get the environment as a list lol
     // wait I cannot do that with lexical scoping
@@ -3078,7 +3374,7 @@ void shsl_fputobj(const shsl_ref ref, FILE* restrict stream) {
     case SHSL_REAL:
 	fprintf(stream, "%f", ref.ptr->r);
 	break;
-    case SHSL_STRING:
+    case SHSL_STR:
 	fprintf(stream, "\"%s\"", ref.ptr->str);
 	break;
     case SHSL_SYM:
