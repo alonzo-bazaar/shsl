@@ -220,6 +220,12 @@ char* shsl_sym_name(shsl_ref sym_ref);
 long shsl_int(shsl_ref ref);
 double shsl_real(shsl_ref ref);
 
+/// FUNCTION OPERATIONS DECLARATIONS
+// we have 4 different function types so it's easier to have separate functions
+// for these tasks
+shsl_ref shsl_fn_env(shsl_ref ref);
+void shsl_fn_env_mark_weak(shsl_ref ref);
+
 
 //// LEXER DECLARATIONS
 //// ----------------------------------------------------------------------------
@@ -700,7 +706,9 @@ bool shsl_is_user_macro(const shsl_ref ref) {
     return shsl_type(ref)==SHSL_USER_MACRO;
 }
 bool shsl_is_fn(const shsl_ref ref) {
-    return shsl_is_builtin_fn(ref) || shsl_is_user_fn(ref);
+    // macros count as functions
+    return shsl_is_builtin_fn(ref) || shsl_is_user_fn(ref)
+	|| shsl_is_builtin_macro(ref) || shsl_is_user_macro(ref);
 }
 bool shsl_is_macro(const shsl_ref ref) {
     return shsl_is_builtin_macro(ref) || shsl_is_user_macro(ref);
@@ -1288,6 +1296,42 @@ long shsl_int(shsl_ref ref) {
 double shsl_real(shsl_ref ref) {
     assert(shsl_is_int(ref) || shsl_is_real(ref));
     return shsl_is_int(ref)?(double)ref.ptr->i:ref.ptr->r;
+}
+
+/// FUNCTION OPERATIONS DEFINITIONS
+shsl_ref shsl_fn_env(shsl_ref ref) {
+    assert(shsl_is_fn(ref));
+    switch(ref.ptr->type) {
+    case SHSL_BUILTIN_FN:
+	return ref.ptr->builtin_fn.env;
+    case SHSL_USER_FN:
+	return ref.ptr->user_fn.env;
+    case SHSL_BUILTIN_MACRO:
+	return ref.ptr->builtin_macro.env;
+    case SHSL_USER_MACRO:
+	return ref.ptr->user_macro.env;
+    default:
+	assert(0 && "unreachable");
+    }
+}
+void shsl_fn_env_mark_weak(shsl_ref ref) {
+    assert(shsl_is_fn(ref));
+    switch(ref.ptr->type) {
+    case SHSL_BUILTIN_FN:
+	shsl_ref_mark_weak(&(ref.ptr->builtin_fn.env));
+	break;
+    case SHSL_USER_FN:
+	shsl_ref_mark_weak(&(ref.ptr->user_fn.env));
+	break;
+    case SHSL_BUILTIN_MACRO:
+	shsl_ref_mark_weak(&(ref.ptr->builtin_macro.env));
+	break;
+    case SHSL_USER_MACRO:
+	shsl_ref_mark_weak(&(ref.ptr->user_macro.env));
+	break;
+    default:
+	assert(0 && "unreachable");
+    }
 }
 
 
@@ -2430,6 +2474,13 @@ shsl_ref shsl_env_set(shsl_ref env, shsl_ref key, shsl_ref new_val) {
         shsl_map_set(shsl_car(env), key, new_val);
     else
         shsl_ref_set(&(kv->v), new_val);
+    // TODO:
+    // shitty incomplete cycle detection for avoiding circular references
+    if(shsl_is_fn(new_val)
+       && shsl_fn_env(new_val).ptr == env.ptr
+       && env.ptr->ref_count > 1)
+	shsl_fn_env_mark_weak(new_val);
+
     return key;
 }
 shsl_ref shsl_env_def(shsl_ref env, shsl_ref key, shsl_ref new_val) {
@@ -2438,6 +2489,12 @@ shsl_ref shsl_env_def(shsl_ref env, shsl_ref key, shsl_ref new_val) {
     assert(shsl_is_map(shsl_car(env)));
 
     shsl_map_set(shsl_car(env), key, new_val);
+
+    if(shsl_is_fn(new_val)
+       && shsl_fn_env(new_val).ptr == env.ptr
+       && env.ptr->ref_count > 1)
+	shsl_fn_env_mark_weak(new_val);
+
     return key;
 }
 
@@ -2786,25 +2843,11 @@ shsl_ref shsl_make_initial_env(void) {
     // wait I cannot do that with lexical scoping
     // this is gonna have to be a special form :| 
 
+    // avoid circular references
     for(size_t i = 0; i<frame_obj.ptr->map.size; ++i) {
 	shsl_ref v = frame_obj.ptr->map.buf[i].v;
-	if(shsl_is_fn(v) || shsl_is_macro(v)) {
-	    switch(shsl_type(v)) {
-	    case SHSL_BUILTIN_FN:
-		shsl_ref_mark_weak(&(v.ptr->builtin_fn.env));
-		break;
-	    case SHSL_USER_FN:
-		shsl_ref_mark_weak(&(v.ptr->user_fn.env));
-		break;
-	    case SHSL_BUILTIN_MACRO:
-		shsl_ref_mark_weak(&(v.ptr->builtin_macro.env));
-		break;
-	    case SHSL_USER_MACRO:
-		shsl_ref_mark_weak(&(v.ptr->user_macro.env));
-		break;
-	    default:
-		assert(0 && "unreachable");
-	    }
+	if(shsl_is_fn(v)) {
+	    shsl_fn_env_mark_weak(v);
 	}
     }
 
