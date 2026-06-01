@@ -77,8 +77,6 @@ defstruct(shsl_user_fn);
 defstruct(shsl_ref);
 
 shsl_obj SHSL_GLOBAL_NIL;
-shsl_ref SHSL_GLOBAL_T;
-shsl_ref SHSL_GLOBAL_IT;
 shsl_ref shsl_ref_to_nil(void);
 
 /// REFERENCE OPERATIONS DECLARATIONS
@@ -102,6 +100,15 @@ void shsl_ref_mark_weak(shsl_ref* ref);
 // and object pointed by src gains a ref
 // only use when overwriting an old value, do not use for initializatin code 
 void shsl_ref_set(shsl_ref* dst, shsl_ref src);
+// the c code deals with a lot of references that may have ref count of 0
+// (the refcount is an shsl thing, the c code kinda does whatever)
+// sometimes that's desired behaviour
+// when working with fresh objects that haven't benn bound yet
+// or when dealing with transient objects
+// then the time comes when you're holding an object and are like 
+// idk if this has been bound to anything while I was using it
+// if it hasn't been bound to anything just burn it
+void shsl_ref_clean_if_dangling(shsl_ref ref);
 
 /// DATA PREDICATES DECLARATIONS
 SHSL_OBJ_TYPE shsl_type(const shsl_ref ref);
@@ -557,7 +564,7 @@ shsl_ref shsl_ref_add(shsl_ref ref) {
     if(ref.is_weak) {
 #ifdef SHSL_LOG_ADD_REF
         printf("[SHSL GC] not adding ref to object %p\n", (void*)(ref.ptr));
-        printf("[SHSL GC] "); shsl_fputobj(ref, stdout);
+        printf("[SHSL GC] "); shsl_fputobj(ref, stdout); fputc('\n', stdout);
         printf("[SHSL GC] because ref is weak\n");
         printf("[SHSL GC] remains at refcount %d\n", ref.ptr->ref_count);
         fputc('\n', stdout);
@@ -567,7 +574,7 @@ shsl_ref shsl_ref_add(shsl_ref ref) {
 
 #ifdef SHSL_LOG_ADD_REF
     printf("[SHSL GC] adding ref to object %p\n", (void*)(ref.ptr));
-    printf("[SHSL GC] "); shsl_fputobj(ref, stdout);
+    printf("[SHSL GC] "); shsl_fputobj(ref, stdout); fputc('\n', stdout);
     printf("[SHSL GC] was at refcount %d\n", ref.ptr->ref_count);
     fputc('\n', stdout);
 #endif
@@ -580,7 +587,7 @@ void shsl_ref_del(shsl_ref ref) {
     if(ref.is_weak) {
 #ifdef SHSL_LOG_DEL_REF
         printf("[SHSL GC] not deleting ref to object %p\n", (void*)(ref.ptr));
-        printf("[SHSL GC] "); shsl_fputobj(ref, stdout);
+        printf("[SHSL GC] "); shsl_fputobj(ref, stdout); fputc('\n', stdout);
         printf("[SHSL GC] because ref is weak\n");
         printf("[SHSL GC] remains at refcount %d\n", ref.ptr->ref_count);
         fputc('\n', stdout);
@@ -590,8 +597,9 @@ void shsl_ref_del(shsl_ref ref) {
 
 #ifdef SHSL_LOG_DEL_REF
     fprintf(stdout, "[SHSL GC] deleting ref to object %p\n", (void*)(ref.ptr));
-    fprintf(stdout, "[SHSL GC] "); shsl_fputobj(ref, stdout);
+    fprintf(stdout, "[SHSL GC] "); shsl_fputobj(ref, stdout); fputc('\n', stdout);
     fprintf(stdout, "[SHSL GC] was at refcount %d\n", ref.ptr->ref_count);
+    fputc('\n', stdout);
 #endif    
     if(shsl_type(ref) == SHSL_NIL)
 	return;
@@ -616,6 +624,10 @@ void shsl_ref_set(shsl_ref* dst, shsl_ref src) {
     shsl_ref_del(*dst);
     dst->ptr = src.ptr;
     dst->is_weak = src.is_weak;
+}
+void shsl_ref_clean_if_dangling(shsl_ref ref) {
+    if(ref.ptr->ref_count == 0)
+	shsl_free(ref);
 }
 
 /// DATA PREDICATES DEFINITIONS
@@ -1406,6 +1418,9 @@ lexer_pair token_off(char* str) {
     if(!str)
 	return error_lexer_pair("cannot read null pointer to string!");
 
+    // skip whitespace
+    while(isspace(*str)) str++;
+
     // handle empty string (we reached the null terminator)
     // once we read SHSL_TOK_EOF we don't need to read any more chars, so we 
     // purposefully return an invalid string to ensure that
@@ -1414,9 +1429,6 @@ lexer_pair token_off(char* str) {
 	    .token = empty_token(SHSL_TOK_EOF),
 	    .remaining = NULL,
 	};
-
-    // skip whitespace
-    while(isspace(*str)) str++;
 
     // handle special chars
     switch(*str) {
@@ -1742,7 +1754,8 @@ shsl_expr* shsl_vexpr_error(shsl_ref form, const char* msg, va_list args) {
 #ifdef SHSL_LOG_ERROR_EXPR
     fprintf(stderr, "[SHSL PARSER ERROR] %s\n", msg);
     fprintf(stderr, "[SHSL PARSER ERROR] with data: ");
-    shsl_fputobj(form, stderr); fputc('\n', stderr);
+    shsl_fputobj(form, stderr);
+    fputc('\n', stderr);
 #endif
     return_mallocd_expr(.type = SHSL_EXPR_LITERAL,
 			.literal = err);
@@ -2428,26 +2441,33 @@ shsl_ref shsl_env_def(shsl_ref env, shsl_ref key, shsl_ref new_val) {
     return key;
 }
 
-// TODO: this thing
-shsl_ref shsl_set_global_it(shsl_ref ref) {
-    shsl_ref_set(&SHSL_GLOBAL_IT, ref);
-    return ref;
-}
-// #define shsl_eval_return(thing) return(shsl_set_global_it(thing))
+// #define shsl_eval_return(thing) do { shsl_ref_set(&it, thing); return thing; } while(0)
 #define shsl_eval_return(thing) return(thing)
+shsl_ref shsl_eval_sequence(shsl_expr** seq, size_t seq_length, shsl_ref env) {
+    if(seq_length == 0)
+	return shsl_ref_to_nil();
 
+    for(size_t i = 0; i<seq_length-1; ++i)
+	shsl_ref_clean_if_dangling(shsl_eval(seq[i], env));
+    shsl_ref res = shsl_eval(seq[seq_length-1], env);
+    return res;
+}
 shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
+    assert(shsl_is_nil(env)
+	   || (shsl_is_cons(env) && shsl_is_map(env.ptr->cons.car))
+	   && "if evaluation env is not null it must be a list of maps!");
+
     switch(expr->type) {
     case SHSL_EXPR_LITERAL:
-	shsl_eval_return(shsl_copy(expr->literal));
+	return shsl_copy(expr->literal);
     case SHSL_EXPR_LOOKUP:
-	shsl_eval_return(shsl_env_lookup(env, expr->lookup_symbol));
+	return shsl_env_lookup(env, expr->lookup_symbol);
     case SHSL_EXPR_VEC: {
 	size_t size = expr->vec_expr.size;
 	shsl_ref vec = shsl_mkvec(size);
 	for(size_t i = 0; i<size; ++i)
 	    shsl_vec_push(vec, shsl_eval(expr->vec_expr.elts[i], env));
-	shsl_eval_return(vec);
+	return vec;
     }
     case SHSL_EXPR_MAP: {
 	size_t size = expr->map_expr.size;
@@ -2456,37 +2476,30 @@ shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
 	    shsl_map_set(map,
 			 shsl_eval(expr->map_expr.keys[i], env),
 			 shsl_eval(expr->map_expr.vals[i], env));
-	shsl_eval_return(map);
+	return map;
     }
-    case SHSL_EXPR_IF:
-	if(shsl_is_truthy(shsl_eval(expr->if_expr.condition, env)))
-	    shsl_eval_return(shsl_eval(expr->if_expr.then_part, env));
+    case SHSL_EXPR_IF: {
+	shsl_ref c = shsl_eval(expr->if_expr.condition, env);
+	shsl_ref res;
+	if(shsl_is_truthy(c))
+	    res=shsl_eval(expr->if_expr.then_part, env);
 	else
-	    shsl_eval_return(shsl_eval(expr->if_expr.else_part, env));
+	    res=shsl_eval(expr->if_expr.else_part, env);
+	shsl_ref_clean_if_dangling(c);
+	return res;
+    }
     case SHSL_EXPR_DO: {
-	size_t len = expr->do_expr.body_length;
-	if(len == 0)
-	    shsl_eval_return(shsl_ref_to_nil());
-
-	shsl_ref inner_env = shsl_mkcons(shsl_mkmap(1), env);
-	// TODO:
-        // if a function is defined inside the inner env and gets a ref to it
-	// then how do we ensure the env is freed correctly if the function
-        // becomes unreachable but still holds a ref to the env?
-	shsl_ref_add(inner_env);
-	for(size_t i = 0; i<len-1; ++i)
-	    shsl_eval(expr->do_expr.body[i], inner_env);
-	shsl_ref res = shsl_eval(expr->do_expr.body[len-1], inner_env);
+	shsl_ref inner_env = shsl_ref_add(shsl_mkcons(shsl_mkmap(1), env));
+	shsl_ref res = shsl_eval_sequence(expr->do_expr.body,
+					  expr->do_expr.body_length,
+					  inner_env);
 	shsl_ref_del(inner_env);
-        shsl_eval_return(res);
+	return res;
     }
     case SHSL_EXPR_DO_POKING: {
-	size_t len = expr->do_poking_expr.body_length;
-	if(len == 0)
-	    shsl_eval_return(shsl_ref_to_nil());
-	for(size_t i = 0; i<len-1; ++i)
-	    shsl_eval(expr->do_poking_expr.body[i], env);
-	shsl_eval_return(shsl_eval(expr->do_expr.body[len-1], env));
+	return shsl_eval_sequence(expr->do_poking_expr.body,
+				  expr->do_poking_expr.body_length,
+				  env);
     }
 
     case SHSL_EXPR_FUNCALL: {
@@ -2502,38 +2515,35 @@ shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
                 (args, fn.ptr->builtin_fn.env);
             shsl_ref_del(fn);
 	    shsl_free(args);
-	    shsl_eval_return(res);
+	    return res;
 	}
 	case SHSL_USER_FN: {
             size_t len = fn.ptr->user_fn.body_length;
             if(len == 0)
-                shsl_eval_return(shsl_ref_to_nil());
+                return shsl_ref_to_nil();
 
             shsl_ref inner_env =
                 shsl_mkcons
-                (shsl_env_mkframe
-                 (fn.ptr->user_fn.lambda_list->positional, args),
+                (shsl_env_mkframe(fn.ptr->user_fn.lambda_list->positional, args),
                  env);
             shsl_ref_add(inner_env);
-            for(size_t i = 0; i<len-1; ++i)
-                shsl_eval(fn.ptr->user_fn.body[i], inner_env);
-
-            shsl_ref res = shsl_eval(fn.ptr->user_fn.body[len-1], inner_env);
-
+            shsl_ref res = shsl_eval_sequence(fn.ptr->user_fn.body,
+					      fn.ptr->user_fn.body_length,
+					      env);
             shsl_ref_del(inner_env);
             shsl_ref_del(fn);
 	    shsl_free(args);
-            shsl_eval_return(res);
+            return res;
         }
 	case SHSL_BUILTIN_MACRO:
 	    shsl_free(args);
-	    shsl_eval_return(shsl_mkerr(fn, "not implemented yet!")); 
+	    return shsl_mkerr(fn, "not implemented yet!"); 
 	case SHSL_USER_MACRO:
 	    shsl_free(args);
-	    shsl_eval_return(shsl_mkerr(fn, "not implemented yet!")); 
+	    return shsl_mkerr(fn, "not implemented yet!"); 
 	default:
 	    shsl_free(args);
-	    shsl_eval_return(shsl_mkerr(fn, "object is not callable!")); 
+	    return shsl_mkerr(fn, "object is not callable!"); 
 	}
     }
     case SHSL_EXPR_FN: {
@@ -2555,18 +2565,17 @@ shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
         lambda_list->keyword = shsl_ref_add
             (expr->fn_expr.lambda_list->keyword);
 
-        shsl_eval_return(shsl_mkuser_fn(env, lambda_list, body, body_length));
+        return shsl_mkuser_fn(env, lambda_list, body, body_length);
     }
 
     case SHSL_EXPR_DEF:
-	shsl_eval_return(shsl_env_def(env,
-				      expr->def_expr.name,
-				      shsl_eval(expr->def_expr.value, env)));
+	return shsl_env_def(env,
+			    expr->def_expr.name,
+			    shsl_eval(expr->def_expr.value, env));
     case SHSL_EXPR_SET:
-	shsl_eval_return(shsl_env_set(env,
-				      expr->def_expr.name,
-				      shsl_eval(expr->def_expr.value, env)));
-
+	return shsl_env_set(env,
+			    expr->def_expr.name,
+			    shsl_eval(expr->def_expr.value, env));
 
     case SHSL_EXPR_WHILE:
     case SHSL_EXPR_LET:
@@ -2736,8 +2745,8 @@ shsl_ref shsl_make_initial_env(void) {
 
     // globals
     shsl_map_set(frame_obj, shsl_mksym("nil"), shsl_ref_to_nil());
-    shsl_map_set(frame_obj, SHSL_GLOBAL_T, SHSL_GLOBAL_T); // t is self evaluating
-    shsl_map_set(frame_obj, shsl_mksym("it"), SHSL_GLOBAL_IT);
+    shsl_ref t = shsl_mksym("t");
+    shsl_map_set(frame_obj, t, t); // t is self evaluating
 
     // arithmetic operations 
     // + - * / > < >= <=
@@ -2938,19 +2947,34 @@ void shsl_fputobj(const shsl_ref ref, FILE* restrict stream) {
 //// USER FACING FUNCTIONS DEFINITIONS
 //// ----------------------------------------------------------------------------
 shsl_ref shsl_eval_str(char* c, shsl_ref env) {
-    parser_pair p = parse_off(c);
-    // TODO: make form_to_expr accept an environment so we can do macro expansion
-    // during form "compilation"?
-    shsl_ref_add(p.ref);
-    shsl_expr* expr = shsl_form_to_expr(p.ref);
-    shsl_ref_del(p.ref);
+    shsl_ref curr = shsl_ref_to_nil();
+    while(true) {
+	parser_pair p = parse_off(c);
+	c = p.remaining;
+	// eof in parse_off is signaled by returning (parser_pair){0}
+	// so, if(!c), it means we reached eof
+	if(!c) break;
 
-    shsl_ref res = shsl_eval(expr, env);
-    shsl_expr_free(expr);
-    return res; 
+	// TODO: make form_to_expr accept an environment so we can
+	// do macro expansion during form "compilation"?
+	shsl_ref_add(p.ref);
+	shsl_expr* expr = shsl_form_to_expr(p.ref);
+	shsl_ref_del(p.ref);
+
+	// shsl_ref_del(res);
+	shsl_ref_set(&curr, shsl_eval(expr, env));
+	shsl_expr_free(expr);
+    }
+
+    // setting curr to the result of eval creates an artificial reference to it
+    // which can cause leakage
+    // but we can't use shsl_ref_del() on curr because this may be the only ref
+    // pointing to the result of eval
+    // fresh values out of eval are valid references with a ref count of 0
+    if(!shsl_is_nil(curr))curr.ptr->ref_count--;
+    return curr;
 }
-
-char* shsl_read_file(const char *path){//, size_t* file_size) {
+char* shsl_read_file(const char *path) {
     FILE *f = fopen(path, "rb");
     if (f == NULL || fseek(f, 0, SEEK_END) < 0) {
 	fprintf(stderr, "Could not read file %s: %s", path, strerror(errno));
@@ -2985,41 +3009,21 @@ char* shsl_read_file(const char *path){//, size_t* file_size) {
     //*file_size = m;
     return contents;
 }
-
 void shsl_eval_file(const char* filepath, shsl_ref env) {
     char* c = shsl_read_file(filepath);
-    // we'll use c to iterate but we need the file start to free it later
-    char* anchor = c;
-    if(!c) return;
-
-    while(true) {
-	parser_pair p = parse_off(c);
-	c = p.remaining;
-	if(!c) break;
-
-	shsl_ref_add(p.ref);
-	shsl_expr* expr = shsl_form_to_expr(p.ref);
-	shsl_ref_del(p.ref);
-
-	shsl_eval(expr, env);
-	shsl_expr_free(expr);
-    }
-
-    free(anchor);
+    shsl_eval_str(c, env);
+    free(c);
 }
-
 void shsl_repl(shsl_ref env) {
     char* line = NULL;
     size_t linelen;
-    printf("shsl> ");
+    fprintf(stdout, "shsl> ");
     while(getline(&line, &linelen, stdin) != -1) {
-	shsl_ref ref = shsl_ref_add(shsl_eval_str(line, env));
-	shsl_fputobj(ref, stdout);
-	shsl_ref_del(ref);
+	shsl_ref ref = shsl_eval_str(line, env);
+	fprintf(stdout, "=> "); shsl_fputobj(ref, stdout); fputc('\n', stdout);
 	free(line);
 	line = NULL;
-	puts("");
-	printf("shsl> ");
+	fprintf(stdout, "\nshsl> ");
     }
     // once getline returns -1 it means eof
     // was it good eof or bad eof? let's ask errno!
@@ -3066,15 +3070,20 @@ void shsl_die(int exit_with, const char* errmsg, ...) {
 
 int main(int argc, char** argv) {
     // init
-    SHSL_GLOBAL_T = shsl_mksym("t");
-    SHSL_GLOBAL_IT = shsl_ref_to_nil();
     shsl_ref env = shsl_make_initial_env();
 
-    // handle ./shsl [file] case (mainly for shebangs)
-    if(argc == 2) {
-	shsl_eval_file(argv[1], env);
-	return 0;
+    // no args, default behaviour just start a repl
+    if(argc == 1) {
+	shsl_repl(env);
+	goto teardown;
     }
+
+    // handle ./shsl [file] [args] case (mainly for shebangs)
+    if(argv[1][0] != '-') { // if first arg is not a flag
+	shsl_eval_file(argv[1], env);
+	goto teardown;
+    }
+
 
     // iterate and execute all
     int i = 1;
@@ -3083,7 +3092,8 @@ int main(int argc, char** argv) {
 	    if(i+1 >= argc)
 		shsl_die(1, "-e flag specified without any code after the flag!");
 	    char* line = argv[i+1];
-            shsl_ref ref = shsl_ref_add(shsl_eval_str(line, env));
+            shsl_ref ref = shsl_eval_str(line, env);
+	    shsl_ref_add(ref);
 	    shsl_fputobj(ref, stdout);
             shsl_ref_del(ref);
 	    puts("");
@@ -3110,6 +3120,7 @@ int main(int argc, char** argv) {
 	    return 1;
 	}
     }
+ teardown:
     shsl_ref_del(env);
     return 0;
 }

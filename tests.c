@@ -97,6 +97,8 @@ void test_map_builder(void) {
     assert(int_eq(1, map.ptr->map.buf[0].v));
     assert(sym_eq("two", map.ptr->map.buf[1].k));
     assert(int_eq(2, map.ptr->map.buf[1].v));
+
+    shsl_free(map);
 }
 // calls all the above
 void test_collection_builders(void) {
@@ -109,14 +111,17 @@ void test_collection_builders(void) {
 void test_list_literals(void) {
     shsl_ref lst = shsl_eval_str("'(a b c)", shsl_ref_to_nil());
     assert(shsl_is_cons(lst));
+    shsl_free(lst);
 }
 void test_vec_literals(void) {
     shsl_ref vec = shsl_eval_str("'[a b c]", shsl_ref_to_nil());
     assert(shsl_is_vec(vec));
+    shsl_free(vec);
 }
 void test_map_literals(void) {
     shsl_ref map = shsl_eval_str("'{a b c c}", shsl_ref_to_nil());
     assert(shsl_is_map(map));
+    shsl_free(map);
 }
 void test_collection_literals(void) {
     SHSL_TEST(test_list_literals());
@@ -129,20 +134,25 @@ void test_error(void) {
     shsl_ref s = shsl_mkerr(shsl_ref_to_nil(), "%s",
 			    "test error generation");
     assert(streq(s.ptr->err.msg.ptr->str, "test error generation"));
+    shsl_free(s);
 }
 
 void test_some_shit(void) {
     shsl_ref a = shsl_eval_str("'a", shsl_ref_to_nil());
     assert(shsl_is_sym(a) && "symbol literal did not return a symbol");
+    shsl_free(a);
 
     shsl_ref b = shsl_eval_str("(if 'a 'b 'c)", shsl_ref_to_nil());
     assert(shsl_is_sym(b)
 	   && "conditional returning symbol literal didn't return symbol");
+    shsl_free(b);
 
     shsl_ref env = shsl_make_initial_env();
     shsl_ref c = shsl_eval_str("(+ 2 2)", env);
     assert(shsl_is_int(c) && "2+2 didn't return an integer");
     assert(int_eq(4, c) && "2+2 should equal 4");
+    shsl_free(env);
+    shsl_free(c);
 }
 
 int main(int argc, char** argv) {

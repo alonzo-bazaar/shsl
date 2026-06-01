@@ -2,22 +2,28 @@
 - [X] map expression
 - [X] object copy
 - [X] -e flag (was already implemented)
-- [ ] -r flag
+- [X] -r flag
 
 - [X] debug why ~do_expr~ evaluation occasionally leads to a reference count below 0
 
 - [X] user functions (object)
   - [X] lambda list
-- [ ] user functions (expression/parsing)
+- [X] user functions (expression/parsing)
+
+- [ ] it (even if I'm using it as a hack to avoid unreachable shit)
+  should be easier to troubleshoot why it didn't work before now that I have -r
 
 - [ ] builtin functions
 - [ ] predicates (isnil, iscons, islist, iserr, isvec, ismap, et al.)
 - [ ] get
 - [ ] set
 
-- [ ] def
-- [ ] set
+- [X] def
+- [X] set
 - [ ] let
+
+- [ ] finish the shsl_expr_copy, shsl_expr_free, &Co. functions
+  (remove the ~assert(0 && "TODO")~ bits and replace them with actual code)
 
 * Hash maps (for env&Co.)
 - [ ] make the hash map use an actual hash function

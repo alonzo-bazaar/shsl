@@ -42,6 +42,10 @@ assert_shsl_equal() {
 
 echo "testing shsl..."
 
+assert_shsl_equal 'nil' "" "an empty program should return nil"
+assert_shsl_equal 'nil' "    " "an program made of only spaces should return nil"
+assert_shsl_equal 'nil' $'\t\n \t' "an program made of only spaces should return nil"
+
 # symbols
 assert_shsl_equal 'a' "'a" "symbol literal doesn't work"
 assert_shsl_equal 'b' "'b" "symbol literal doesn't work"
