@@ -3730,7 +3730,7 @@ void shsl_usage(const char* name, bool print_extra, FILE* restrict stream) {
 	"  %s -e \"(def a 10)\" -f file.shsl -r \n"
 	"  will define a to be 10, run file.shsl with a bound to 10,\n"
 	"  and after all that, in the vm where the previous two flags were run,\n"
-	"start a repl\n";
+	"  start a repl\n";
     fprintf(stream, msg, name, name, name, name);
     if(print_extra)
 	fprintf(stream, extra, name);
