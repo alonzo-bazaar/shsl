@@ -78,16 +78,43 @@ assert_shsl_equal '{}' "'{}" "empty quoted map"
 
 # operations on collection literals
 
+# def and set
+assert_shsl_equal '10' "(def a 10)"
+assert_shsl_equal '20' "(def a 10) (set a 20)"
+assert_shsl_equal '30' "(def a 10) (set a 20) (set a 30)"
+
+assert_shsl_equal '10' "(def a 10)"
+assert_shsl_equal '20' "(def a 10) (def a 20)"
+assert_shsl_equal '30' "(def a 10) (def a 20) (def a 30)"
+
+assert_shsl_equal '10' "(set a 10)"
+assert_shsl_equal '20' "(set a 10) (set a 20)"
+assert_shsl_equal '30' "(set a 10) (set a 20) (set a 30)"
+
+assert_shsl_equal '10' "(set a 10)"
+assert_shsl_equal '20' "(set a 10) (def a 20)"
+assert_shsl_equal '30' "(set a 10) (def a 20) (def a 30)"
+
 # do blocks
 # (newlines in bash are fucking weird bruh)
-assert_shsl_equal $'fuckyou\nnil' "(do (print 'fuck) (println 'you))" "do blocks"
-assert_shsl_equal $'youfuck\nnil' "(do (print 'you) (println 'fuck))" "do blocks"
-assert_shsl_equal $'fuck\nyou\nnil' "(do (println 'fuck) (println 'you))" "do blocks"
-assert_shsl_equal $'you\nfuck\nnil' "(do (println 'you) (println 'fuck))" "do blocks"
+assert_shsl_equal $'fuckyou\nyou' "(do (print 'fuck) (println 'you))" "do blocks"
+assert_shsl_equal $'youfuck\nfuck' "(do (print 'you) (println 'fuck))" "do blocks"
+assert_shsl_equal $'fuck\nyou\nyou' "(do (println 'fuck) (println 'you))" "do blocks"
+assert_shsl_equal $'you\nfuck\nfuck' "(do (println 'you) (println 'fuck))" "do blocks"
 
 # let blocks
 assert_shsl_equal '10' "(def a 10) (let [a [1 2 3]] a) a"
 assert_shsl_equal '[1, 2, 3]' "(def a [1 2 3]) (let [a 10] a) a"
+assert_shsl_equal '[1, 2, 3]' "(def a 10) (let [a [1 2 3]] a)"
+assert_shsl_equal '10' "(def a [1 2 3]) (let [a 10] a)"
+
+# if then else
+assert_shsl_equal 'nil' "(if nil 'a)"
+assert_shsl_equal 'b' "(if nil 'a 'b)"
+assert_shsl_equal 'a' "(if t 'a 'b)"
+assert_shsl_equal 'a' "(if t 'a)"
+assert_shsl_equal 'a' "(if 'a 'a)"
+assert_shsl_equal 'nil' "(if (err \"this is a test error don't worry\" \"dwai\") 'a)"
 
 # builtin funs
 assert_shsl_equal 'nil' "(> 10 20)"
@@ -95,14 +122,14 @@ assert_shsl_equal 't' "(< 10 20)"
 assert_shsl_equal 'nil' "(>= 10 20)"
 assert_shsl_equal 't' "(<= 10 20)"
 
-assert_shsl_equal 't' "(isnil nil)"
-assert_shsl_equal 't' "(isnil '())"
-assert_shsl_equal 'nil' "(isnil t)"
+assert_shsl_equal 't' "(nil? nil)"
+assert_shsl_equal 't' "(nil? '())"
+assert_shsl_equal 'nil' "(nil? t)"
 
-assert_shsl_equal 't' "(issym t)"
-assert_shsl_equal 't' "(issym 'hello)"
-assert_shsl_equal 'nil' "(issym 'nil)"
-assert_shsl_equal 'nil' "(issym 10)"
+assert_shsl_equal 't' "(sym? t)"
+assert_shsl_equal 't' "(sym? 'hello)"
+assert_shsl_equal 'nil' "(sym? 'nil)"
+assert_shsl_equal 'nil' "(sym? 10)"
 
 assert_shsl_equal '(a b)' "(cons 'a (cons 'b nil))"
 # TODO: this should print 10000
@@ -110,6 +137,7 @@ assert_shsl_equal '(a b)' "(cons 'a (cons 'b nil))"
 # (((fn [a] (fn [b] (a a b))) (fn [a] (* a a))) 10)
 # TODO:
 # this prints a at the end for some fucking reason
+# ok it's set returning the key
 # "(let [a 0] (while (< a 10) (println a) (set a (+ a 1))))"
 
 echo "if you see this and nothing blew up then all tests pass!"

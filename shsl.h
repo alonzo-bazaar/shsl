@@ -2044,7 +2044,18 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
 
 		shsl_expr* c = body[0];
 		shsl_expr* t = body[1];
-		shsl_expr* e = body[2];
+		// (if <condition> <then>) becomes (if <condition> <then> nil)
+		// gotta handle that case
+		shsl_expr* e;
+		if(form_length == 4)
+		    e = body[2];
+		else {
+		    e = malloc(sizeof(shsl_expr));
+		    *e = (shsl_expr) {
+			.type = SHSL_EXPR_LITERAL,
+			.literal = shsl_ref_to_nil(),
+		    };
+		}
 		free(body);
 
 		return_mallocd_expr(.type = SHSL_EXPR_IF,
@@ -2675,7 +2686,7 @@ shsl_ref shsl_env_set(shsl_ref env, shsl_ref key, shsl_ref new_val) {
        && env.ptr->ref_count > 1)
 	shsl_fn_env_mark_weak(new_val);
 
-    return key;
+    return new_val;
 }
 shsl_ref shsl_env_def(shsl_ref env, shsl_ref key, shsl_ref new_val) {
     assert(shsl_is_sym(key));
@@ -2689,7 +2700,7 @@ shsl_ref shsl_env_def(shsl_ref env, shsl_ref key, shsl_ref new_val) {
        && env.ptr->ref_count > 1)
 	shsl_fn_env_mark_weak(new_val);
 
-    return key;
+    return new_val;
 }
 
 shsl_ref shsl_eval_sequence(shsl_expr** seq, size_t seq_length, shsl_ref env) {
@@ -2898,8 +2909,8 @@ shsl_ref shsl_eval_many_into_vec(shsl_expr** args, size_t args_length,
 #define shsl_fn_assert(ass) do {				\
 	if(!(ass))						\
 	    return shsl_mkerr(shsl_ref_to_nil(),		\
-			      "in function %s, assertion "	\
-			      #ass "failed!", shsl_fn_name);	\
+			      "in function %s:\nAssertion ["	\
+			      #ass "] failed!", shsl_fn_name);	\
     } while(0)
 
 #define shsl_fn_assert_vec(args)		\
@@ -3055,67 +3066,67 @@ shsl_defun(shsl_builtin_le, "<=", args, env, {
     })
 
 /// SHSL BUILTIN DATA FUNCTIONS DEFINITIONS
-shsl_defun(shsl_builtin_isnil, "isnil", args, env, {
+shsl_defun(shsl_builtin_isnil, "nil?", args, env, {
 	(void)env;
 	shsl_fn_assert_argslen(== 1);
 	return shsl_bool_to_obj(shsl_is_nil(shsl_fn_arg(0)));
     })
-shsl_defun(shsl_builtin_isint, "isint", args, env, {
+shsl_defun(shsl_builtin_isint, "int?", args, env, {
 	(void)env;
 	shsl_fn_assert_argslen(== 1);
 	return shsl_bool_to_obj(shsl_is_int(shsl_fn_arg(0)));
     })
-shsl_defun(shsl_builtin_isreal, "isreal", args, env, {
+shsl_defun(shsl_builtin_isreal, "real?", args, env, {
 	(void)env;
 	shsl_fn_assert_argslen(== 1);
 	return shsl_bool_to_obj(shsl_is_real(shsl_fn_arg(0)));
     })
-shsl_defun(shsl_builtin_isnum, "isnum", args, env, {
+shsl_defun(shsl_builtin_isnum, "num?", args, env, {
 	(void)env;
 	shsl_fn_assert_argslen(== 1);
 	return shsl_bool_to_obj(shsl_is_num(shsl_fn_arg(0)));
     })
-shsl_defun(shsl_builtin_issym, "issym", args, env, {
+shsl_defun(shsl_builtin_issym, "sym?", args, env, {
 	(void)env;
 	shsl_fn_assert_argslen(== 1);
 	return shsl_bool_to_obj(shsl_is_sym(shsl_fn_arg(0)));
     })
-shsl_defun(shsl_builtin_isstr, "isstr", args, env, {
+shsl_defun(shsl_builtin_isstr, "str?", args, env, {
 	(void)env;
 	shsl_fn_assert_argslen(== 1);
 	return shsl_bool_to_obj(shsl_is_str(shsl_fn_arg(0)));
     })
-shsl_defun(shsl_builtin_iserr, "iserr", args, env, {
+shsl_defun(shsl_builtin_iserr, "err?", args, env, {
 	(void)env;
 	shsl_fn_assert_argslen(== 1);
 	return shsl_bool_to_obj(shsl_is_err(shsl_fn_arg(0)));
     })
-shsl_defun(shsl_builtin_iscons, "iscons", args, env, {
+shsl_defun(shsl_builtin_iscons, "cons?", args, env, {
 	(void)env;
 	shsl_fn_assert_argslen(== 1);
 	return shsl_bool_to_obj(shsl_is_cons(shsl_fn_arg(0)));
     })
-shsl_defun(shsl_builtin_isvec, "isvec", args, env, {
+shsl_defun(shsl_builtin_isvec, "vec?", args, env, {
 	(void)env;
 	shsl_fn_assert_argslen(== 1);
 	return shsl_bool_to_obj(shsl_is_vec(shsl_fn_arg(0)));
     })
-shsl_defun(shsl_builtin_ismap, "ismap", args, env, {
+shsl_defun(shsl_builtin_ismap, "map?", args, env, {
 	(void)env;
 	shsl_fn_assert_argslen(== 1);
 	return shsl_bool_to_obj(shsl_is_map(shsl_fn_arg(0)));
     })
-shsl_defun(shsl_builtin_islist, "islist", args, env, {
+shsl_defun(shsl_builtin_islist, "list?", args, env, {
 	(void)env;
 	shsl_fn_assert_argslen(== 1);
 	return shsl_bool_to_obj(shsl_is_list(shsl_fn_arg(0)));
     })
-shsl_defun(shsl_builtin_isfn, "isfn", args, env, {
+shsl_defun(shsl_builtin_isfn, "fn?", args, env, {
 	(void)env;
 	shsl_fn_assert_argslen(== 1);
 	return shsl_bool_to_obj(shsl_is_fn(shsl_fn_arg(0)));
     })
-shsl_defun(shsl_builtin_ismacro, "ismacro", args, env, {
+shsl_defun(shsl_builtin_ismacro, "macro?", args, env, {
 	(void)env;
 	shsl_fn_assert_argslen(== 1);
 	return shsl_bool_to_obj(shsl_is_macro(shsl_fn_arg(0)));
@@ -3125,6 +3136,13 @@ shsl_defun(shsl_builtin_err, "err", args, env, {
 	(void)env;
 	shsl_fn_assert_argslen(>= 1);
 	shsl_fn_assert_argtype(0, SHSL_STR);
+
+	// shsl's error function takes message first and data later
+	// the c version does the opposite out of kinda necessity
+	// I wanted to support formatted errors so it made more sense
+	// to have the (format) string at the end with the formatted shit
+	if(shsl_fn_argslen() == 2)
+	    return shsl_mkerr(shsl_fn_arg(1), shsl_fn_arg(0).ptr->str);
 
 	shsl_cb rest_builder = shsl_cb_make(SHSL_CB_LIST);
 	for(size_t i = 1; i<shsl_fn_argslen(); ++i)
@@ -3180,7 +3198,7 @@ shsl_defun(shsl_builtin_vecget, "vecget", args, env, {
 		(ind, "in funciton vecget: vector out of bounds read!");
 	return shsl_vec_get(vec, (size_t)shsl_int(ind));
     })
-shsl_defun(shsl_builtin_vecset, "vecset", args, env, {
+shsl_defun(shsl_builtin_vecset, "vecset!", args, env, {
 	(void)env;
 	shsl_fn_assert_argslen(== 2);
 	shsl_fn_assert_argtype(0, SHSL_VEC);
@@ -3194,7 +3212,7 @@ shsl_defun(shsl_builtin_vecset, "vecset", args, env, {
 
 	return vec;
     })
-shsl_defun(shsl_builtin_vecpush, "vecpush", args, env, {
+shsl_defun(shsl_builtin_vecpush, "vecpush!", args, env, {
 	(void)env;
 	shsl_fn_assert_argslen(== 2);
 	shsl_fn_assert_argtype(1, SHSL_VEC);
@@ -3220,7 +3238,7 @@ shsl_defun(shsl_builtin_mapget, "mapget", args, env, {
 	// TODO: this smells of leak
 	return shsl_map_get(shsl_fn_arg(0), shsl_fn_arg(1));
     })
-shsl_defun(shsl_builtin_mapset, "mapset", args, env, {
+shsl_defun(shsl_builtin_mapset, "mapset!", args, env, {
 	(void)env;
 	shsl_fn_assert_argslen(== 3);
 	shsl_fn_assert_argtype(0, SHSL_MAP);
@@ -3230,7 +3248,7 @@ shsl_defun(shsl_builtin_mapset, "mapset", args, env, {
     })
 
 /// SHSL BUILTIN OTHER FUNCTIONS DEFINITIONS
-shsl_defun(shsl_builtin_equal, "==", args, env, {
+shsl_defun(shsl_builtin_equal, "=", args, env, {
 	(void)env;
 	shsl_fn_assert_argslen(== 2);
 	return shsl_bool_to_obj(shsl_eq(shsl_fn_arg(0), shsl_fn_arg(1)));
@@ -3243,12 +3261,16 @@ shsl_defun(shsl_builtin_pr, "pr", args, env, {
 	    if(i+1 != shsl_vec_length(args))
 		fputc(' ', stdout);
 	}
-	return shsl_ref_to_nil();
+	if(shsl_fn_argslen() == 0)
+	    return shsl_ref_to_nil();
+	return shsl_fn_arg(0);
     })
 shsl_defun(shsl_builtin_prn, "prn", args, env, {
 	shsl_builtin_pr(args, env);
 	fputc('\n', stdout);
-	return shsl_ref_to_nil();
+	if(shsl_fn_argslen() == 0)
+	    return shsl_ref_to_nil();
+	return shsl_fn_arg(0);
     })
 shsl_defun(shsl_builtin_print, "print", args, env, {
 	(void)env;
@@ -3257,12 +3279,16 @@ shsl_defun(shsl_builtin_print, "print", args, env, {
 	    if(i+1 != shsl_vec_length(args))
 		fputc(' ', stdout);
 	}
-	return shsl_ref_to_nil();
+	if(shsl_fn_argslen() == 0)
+	    return shsl_ref_to_nil();
+	return shsl_fn_arg(0);
     })
 shsl_defun(shsl_builtin_println, "println", args, env, {
 	shsl_builtin_print(args, env);
 	fputc('\n', stdout);
-	return shsl_ref_to_nil();
+	if(shsl_fn_argslen() == 0)
+	    return shsl_ref_to_nil();
+	return shsl_fn_arg(0);
     })
 
 shsl_ref shsl_make_initial_env(void) {
@@ -3295,30 +3321,30 @@ shsl_ref shsl_make_initial_env(void) {
 		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_le));
 
     // data predicates
-    shsl_map_set(frame_obj, shsl_mksym("isnil"),
+    shsl_map_set(frame_obj, shsl_mksym("nil?"),
 		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_isnil));
-    shsl_map_set(frame_obj, shsl_mksym("isint"),
+    shsl_map_set(frame_obj, shsl_mksym("int?"),
 		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_isint));
-    shsl_map_set(frame_obj, shsl_mksym("isreal"),
+    shsl_map_set(frame_obj, shsl_mksym("real?"),
 		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_isreal));
-    shsl_map_set(frame_obj, shsl_mksym("issym"),
+    shsl_map_set(frame_obj, shsl_mksym("sym?"),
 		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_issym));
-    shsl_map_set(frame_obj, shsl_mksym("isstr"),
+    shsl_map_set(frame_obj, shsl_mksym("str?"),
 		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_isstr));
-    shsl_map_set(frame_obj, shsl_mksym("iserr"),
+    shsl_map_set(frame_obj, shsl_mksym("err?"),
 		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_iserr));
-    shsl_map_set(frame_obj, shsl_mksym("iscons"),
+    shsl_map_set(frame_obj, shsl_mksym("cons?"),
 		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_iscons));
-    shsl_map_set(frame_obj, shsl_mksym("isvec"),
+    shsl_map_set(frame_obj, shsl_mksym("vec?"),
 		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_isvec));
-    shsl_map_set(frame_obj, shsl_mksym("ismap"),
+    shsl_map_set(frame_obj, shsl_mksym("map?"),
 		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_ismap));
-    shsl_map_set(frame_obj, shsl_mksym("islist"),
+    shsl_map_set(frame_obj, shsl_mksym("list?"),
 		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_islist));
 
-    shsl_map_set(frame_obj, shsl_mksym("isfn"),
+    shsl_map_set(frame_obj, shsl_mksym("fn?"),
 		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_isfn));
-    shsl_map_set(frame_obj, shsl_mksym("ismacro"),
+    shsl_map_set(frame_obj, shsl_mksym("macro?"),
 		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_ismacro));
 
     // list operations
@@ -3337,17 +3363,17 @@ shsl_ref shsl_make_initial_env(void) {
     // vector operations
     shsl_map_set(frame_obj, shsl_mksym("vecget"),
 		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_vecget));
-    shsl_map_set(frame_obj, shsl_mksym("vecset"),
+    shsl_map_set(frame_obj, shsl_mksym("vecset!"),
 		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_vecset));
     shsl_map_set(frame_obj, shsl_mksym("veclen"),
 		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_veclen));
-    shsl_map_set(frame_obj, shsl_mksym("vecpush"),
+    shsl_map_set(frame_obj, shsl_mksym("vecpush!"),
 		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_vecpush));
 
     // map operations
     shsl_map_set(frame_obj, shsl_mksym("mapget"),
 		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_mapget));
-    shsl_map_set(frame_obj, shsl_mksym("mapset"),
+    shsl_map_set(frame_obj, shsl_mksym("mapset!"),
 		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_mapset));
 
     // error functions
@@ -3358,7 +3384,7 @@ shsl_ref shsl_make_initial_env(void) {
     // map, filter, reduce
 
     // other functions
-    shsl_map_set(frame_obj, shsl_mksym("=="),
+    shsl_map_set(frame_obj, shsl_mksym("="),
 		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_equal));
     shsl_map_set(frame_obj, shsl_mksym("pr"),
 		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_pr));
@@ -3457,7 +3483,7 @@ void shsl_fpr(const shsl_ref ref, FILE* restrict stream) {
 	fprintf(stream, "\"%s\"", ref.ptr->str);
 	break;
     case SHSL_SYM:
-	fprintf(stream, "'%s", shsl_sym_name(ref));
+	fprintf(stream, "%s", shsl_sym_name(ref));
 	break;
     case SHSL_NIL:
 	fputs("nil", stream);
@@ -3480,11 +3506,11 @@ void shsl_fpr(const shsl_ref ref, FILE* restrict stream) {
 	    fputc(')', stream);
 	}
 	else {
-	    fputs("(cons ", stream);
+	    fputs("(", stream);
 	    shsl_fpr(ref.ptr->cons.car, stream);
-	    fputc(' ', stream);
+	    fputs(" . ", stream);
 	    shsl_fpr(ref.ptr->cons.cdr, stream);
-	    fputc(')', stream);
+	    fputs(")", stream);
 	}
 	break;
     case SHSL_VEC:
@@ -3541,7 +3567,7 @@ void shsl_fprint(const shsl_ref ref, FILE* restrict stream) {
 	break;
     case SHSL_ERR:
 	fprintf(stream, "(ERROR: \"%s\" WITH DATA ", ref.ptr->err.msg.ptr->str);
-	shsl_fprint(ref.ptr->err.data, stream);
+	shsl_fpr(ref.ptr->err.data, stream);
 	fprintf(stream, ")");
 	break;
     case SHSL_CONS:
@@ -3549,7 +3575,7 @@ void shsl_fprint(const shsl_ref ref, FILE* restrict stream) {
 	    fputc('(', stream);
 	    shsl_ref iter = ref;
 	    while(shsl_is_cons(iter)) {
-		shsl_fprint(iter.ptr->cons.car, stream);
+		shsl_fpr(iter.ptr->cons.car, stream);
 		if(shsl_is_cons(iter.ptr->cons.cdr))
 		    fputs(" ", stream);
 		iter = iter.ptr->cons.cdr;
@@ -3557,17 +3583,19 @@ void shsl_fprint(const shsl_ref ref, FILE* restrict stream) {
 	    fputc(')', stream);
 	}
 	else {
+	    // note: we use dotted list notation for printing but we can't really
+	    // parse it :|
 	    fputc('(', stream);
-	    shsl_fprint(ref.ptr->cons.car, stream);
+	    shsl_fpr(ref.ptr->cons.car, stream);
 	    fputs(" . ", stream);
-	    shsl_fprint(ref.ptr->cons.cdr, stream);
+	    shsl_fpr(ref.ptr->cons.cdr, stream);
 	    fputc(')', stream);
 	}
 	break;
     case SHSL_VEC:
 	fputc('[', stream);
 	shsl_vec_foreach(i, elt, ref) {
-	    shsl_fprint(elt, stream);
+	    shsl_fpr(elt, stream);
 	    if(i != shsl_vec_length(ref)-1)
 		fputs(", ", stream);
 	}
@@ -3578,7 +3606,7 @@ void shsl_fprint(const shsl_ref ref, FILE* restrict stream) {
 	for(size_t i = 0; i<ref.ptr->map.size; ++i) {
 	    shsl_fprint(ref.ptr->map.buf[i].k, stream);
 	    fputs(":", stream);
-	    shsl_fprint(ref.ptr->map.buf[i].v, stream);
+	    shsl_fpr(ref.ptr->map.buf[i].v, stream);
 	    if(i != ref.ptr->vec.size -1)
 		fputs(", ", stream);
 	}
