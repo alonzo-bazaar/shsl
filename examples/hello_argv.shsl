@@ -1,0 +1,7 @@
+;; -*- mode:clojurescript -*-
+(println (veclen argv))
+(if (== (veclen argv) 0)
+  (println "hello, nameless one")
+  (if (== (veclen argv) 1)
+    (println "hello," (vecget argv 0))
+    (println "woah there buddy, that's way too many names!")))

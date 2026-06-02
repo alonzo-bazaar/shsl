@@ -3748,6 +3748,7 @@ void shsl_die(int exit_with, const char* errmsg, ...) {
 int main(int argc, char** argv) {
     // init
     shsl_ref env = shsl_make_initial_env();
+    shsl_env_def(env, shsl_mksym("progname"), shsl_mkstr(argv[0]));
 
     // no args, default behaviour just start a repl
     if(argc == 1) {
@@ -3758,10 +3759,16 @@ int main(int argc, char** argv) {
     // handle ./shsl [file] [args] case (mainly for shebangs)
     // and ease in passing argv to shsl files
     if(argv[1][0] != '-') { // if first arg is not a flag
+        shsl_ref shsl_argv = shsl_mkvec(1);
+        for(int i = 2; i<argc; ++i) {
+            shsl_vec_push(shsl_argv, shsl_mkstr(argv[i]));
+        }
+        shsl_env_def(env, shsl_mksym("argv"), shsl_argv);
 	shsl_eval_file(argv[1], env);
 	goto teardown;
     }
 
+    shsl_env_def(env, shsl_mksym("argv"), shsl_mkvec(0));
 
     // iterate and execute all
     int i = 1;
