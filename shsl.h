@@ -891,7 +891,7 @@ shsl_ref shsl_copy(shsl_ref ref) {
     case SHSL_SYM:    return shsl_mksym(ref.ptr->sym.name.ptr->str);
     case SHSL_INT:    return shsl_mkint(ref.ptr->i);
     case SHSL_REAL:   return shsl_mkint(ref.ptr->r);
-    case SHSL_STR: return shsl_mkstr(ref.ptr->str);
+    case SHSL_STR:    return shsl_mkstr(ref.ptr->str);
 
     case SHSL_ERR:    return shsl_mkerr(shsl_copy(ref.ptr->err.data),
 						  ref.ptr->err.msg.ptr->str);
@@ -2540,7 +2540,7 @@ shsl_expr* shsl_expr_copy(shsl_expr* orig) {
 	return_mallocd_expr
 	    (.type = SHSL_EXPR_LET,
 	     .let_expr = (shsl_let_expr) {
-		 .keys = shsl_copy(orig->let_expr.keys),
+		 .keys = shsl_ref_add(shsl_copy(orig->let_expr.keys)),
 		 .vals = vals,
 		 .binds_length = binds_length,
 		 .body = body,

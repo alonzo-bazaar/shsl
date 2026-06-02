@@ -143,3 +143,22 @@ I have two ideas at the moment for how to make shsl an actually single header sc
 godo, nella ref posso mettere se è mutable
 e se manipolo le ref solo con funzioni che accettano ref poi quelle funzioni posso fargli ritornare, /for instance/, ~t~ o un errore
 daje
+
+** fixed refs
+some references are just pointers that I'm wragling through references
+I could add a field to references called like
+~fixed~
+that controls wether that references can get updates by ref counts and shit
+
+for instance
+subexpressions
+I can say without much doubt that handling some subexpressions through refcounted pointers has been, for lack of a better word, a fucking mistake
+mostly because refcounting as is currently implemented marks just about everything as statey
+and just about every state as affecting every other state
+
+which means I need to like, take a far better, far futher look at the various contracts I have between modules as far as reference counts are concerned  
+because I handle a lot of references with count 0 in the c code
+
+** mark and sweep
+
+** mark compact
