@@ -1,0 +1,188 @@
+* SHL
+Single Header Scripting (language|library|layer|lisp)
+SHSL is a small scripting language with a [[https://clojure.org/][clojure]]-like syntax meant to be as easy as possible to add to an existing C or C++ project.
+
+#+begin_quote
+*NOTE:* SHSL is still at a rather early stage so many aspects of the language and library are likely to change with future versions or releases, you can depend on a given version without much problem since it's meant to be vendored with your project, but keep that in mind when upgrading your SHSL.
+#+end_quote
+
+* Raison d'etre
+Many C/C++ projects end up requiring some form or another of scripts to support various aspects of the project, be it build scripts, configuration, some orchestration logic, protoyping, or whatnot, current solutions for adding such scripts to a C program all suffer from a fair amount of drawback. 
+
+Consider for instance the problem of adding a build script/build step to your C/C++ project, current approaches may be
+- A shell script (~build.sh~) :: but that's hardly portable.
+- Makefile :: but it's quite difficult to make a cross platform makefile, plus makefiles can get rather esoteric rarther quickly.
+- Cmake :: which is a more common choice for larger project but can be a huge upfront dependency for smaller projects, plus it introduces a lot of moving parts that can often get in the way, a whole new set of concepts you need to learn, and is often just plain overkill.
+
+SHSL aims to serve the niche of C/C++ projects that are large enough to need a script for something, but small enough that other cross platform solutions for scripting would be an overkill dependency.
+
+Being a singe C header SHSL is quite easy to vendor with your project, to run any script in your project you just need to compile one C file and there's your runner, and being a header file you can also include it in your C files and run the scripts from wihtin C code!
+
+* Compiling
+#+begin_quote
+*NOTE:* SHSL Has been tested with ~clang~ and ~gcc~ on Linux, the code is meant to be compiler and OS agnostic but I haven't tested it on other compilers or operating systems to verify this.
+#+end_quote
+
+If you have downloaded this entire repository you can just compile SHSL with
+#+begin_src bash
+  make shsl
+#+end_src
+Which will create a ~shsl~ executable in the project root.
+
+If you wanna include SHSL in your project as just an ~.h~ file you can compile SHSL by calling
+#+begin_src bash
+  cc -DSHSL_IMPLEMENTATION -DSHSL_MAIN -x c -o shsl shsl.h
+#+end_src
+
+If that's too many flags ~shsl.c~ is provided as a convenience file, if you include ~shsl.c~ and ~shsl.h~ in the same somewhere in your project you can compile SHSL to an executable by instead calling
+
+#+begin_src bash
+  cc -o shsl shsl.c
+#+end_src
+
+If you have more complex project structure in which you want to include SHSL, it's just a an h file and maybe a c file, you can add them to your project as you would any other c and h file, that's the beauty of it.
+
+** Compiling/running the tests
+To compile and run the C tests you run
+#+begin_src bash
+  make test
+#+end_src
+
+There are also some tests written in bash which you can run by calling
+#+begin_src bash
+  ./test.sh
+#+end_src
+* Usage
+Assuming you're in the project root and that the SHSL executable is called ~./shsl~
+
+You can start an SHSL repl by calling
+#+begin_src bash
+./shsl
+#+end_src
+or, if you wanna be more explicit
+#+begin_src bash
+./shsl -r
+#+end_src
+this will give you a ~shsl>~ prompt in which you can type SHSL code, hit enter, and it will immediately run it and print the result for you.
+#+begin_quote
+NOTE: SHSL doesn't have a multiline repl yet, it will evaluate every line you pass to the repl as a separate expression, if you want to pass it longer expressions you'll either have to flatten them to a single line or run then from a file.
+#+end_quote
+
+You can run an shsl script by calling
+#+begin_src bash
+./shsl <file>
+#+end_src
+or, if you wanna be more explicit
+#+begin_src bash
+./shsl -f <file>
+#+end_src
+Although please note the first version will pass any additional arguments to ~<file>~ as an argv, whereas the second version will interpret any additional arguments as more SHSL command line arguments.
+
+SHSL supports shebangs in script files so you can also call a script by having the script begin with ~#!/path/to/shsl/executable~ (or ~#!/usr/bin/env name_of_shsl_executable~ if SHSL is in your ~$PATH~) and invoking the script as
+#+begin_src bash
+  ./path/to/script
+#+end_src
+(and remember to ~chmod +x ./path/to/script~ first)
+
+You can also give SHSL a string of SHSL code to run from the command line itself by calling
+#+begin_src bash
+  ./shsl -e <string of shsl code>
+#+end_src
+this can be useful if you want to run a snippet of SHSL code in another script (such as a bash script), or for testing purposes.
+
+Or to have shsl print you a help message you can run
+#+begin_src bash
+  ./shsl -h
+#+end_src
+
+When given several flags SHSL will go through them in order and run all the flags one after the other, for instance
+#+begin_src bash
+  ./shsl -e "(println \"hello\")" -e "(println \"world\")" -r
+#+end_src
+will print ~"hello"~ first, then ~"world"~, then start a repl.
+
+* Language
+As previously hinted SHSL syntax +steals+ takes a fair bit if inspiration from clojure, this is because I like clojure's syntax and I like getting syntax highlighting and editor support for free by just naming the file ~script.clj~ instead of ~script.shsl~.
+
+The following is a [[https://learnxinyminutes.com/][learnxinyminutes]] style rundown of SHSL's various syntax and features, the file is also available at ~examples/learn_shsl.shsl~ 
+#+begin_src clojurescript
+  #!/usr/bin/env cljs
+  ;; the contents of the shebang don't matter, it's meant to be read by the os
+  ;; not by shsl, shsl just has to recognize it and skip ignore it
+
+  ;; as you may have already guessed comments start with ;
+  ; single
+  ;; double
+  ;;; triple
+  ;;;;;;;;; doesn't really matter
+
+  ;; you can define variables as
+  (def example-num 10)
+  (def example-str "I am a stegosaurus")
+  (def example-arr [1 2 3 example-str])
+  (def example-map {"one" 1
+                    "two" 2
+                    "ten" example-num})
+
+  ;; whitespace doens't really matter for separating array/map elements
+  ;; as long as there's at least one space it's ok
+  (def look-mum [
+                 "I'm using"
+
+                 "only"
+                 
+
+                 "newlines"
+                 ])
+
+  ;; to call a function you do (<function name> <argsuments>...)
+  (println example-num) ;; => 10
+  (println example-str) ;; => I am a stegosaurus
+  (println example-arr) ;; => [1, 2, 3, I am a stegosaurus]
+  (println example-map) ;; => {one:1, two:2, three:3}
+  (println look-mum)    ;; => [I'm using, only, newlines]
+
+  (println (+ 5 7))
+
+  ;; by default shsl will see any ( thing thing thing ) as code to make it treat
+  ;; is as a list you must quote it by putting an apostrophe ' before it
+  (def example-lst '(1 2 3))
+
+  ;; you can also quote symbols, which will return the symbol itself instead of
+  ;; interpreting it as a variable lookup
+  (def example-sym 'hello)
+  (println example-sym)
+  (println 'example-sym)
+
+  ;; shsl supports most of the control flow constructs you're used to 
+  ;; if statements are written as a list (if <condition> <then> <else>)
+  (if (== example-num 5)
+    (println example-num "is equal to" 5)
+    (println example-num "is not equal to" 5))
+
+  ;; (TO BE CONTINUED...)
+#+end_src
+
+* Repo structure
+- ~shsl.h~ :: the master file, the entire langauge is defined in here
+- ~shsl.c~ :: convenience file for compilation
+- ~Makefile~ :: Makefile
+- ~examples/~ :: various examples of shsl scripts, all the scripts in this directory can be run with the current shsl version
+- ~ramblings/~ :: various notes to self I felt the need to version
+- ~docs/~ :: (currently absent) documentation
+
+* Roadmap
+- [X] get language to a usable state
+- [ ] fix leaks when lexer or parser return an error
+- [X] tests
+- [ ] but like, a looooot of tests
+- [ ] documentation
+- [ ] CFFI through a ctypes like library
+- [ ] an ~exec~ function for scripting
+- [ ] an ~execasync~ function for scripting
+- [ ] proper hash maps instead of using a sequential vector of key/value pairs
+- [ ] support for more memory management schemas (implement mark and sweep and have an interface that can accomodate mark and sweep)
+- [ ] support for lisp macros
+- [ ] test on windows (through wine)
+
+* Similar projects

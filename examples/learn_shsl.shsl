@@ -1,0 +1,56 @@
+#!/usr/bin/env cljs
+;; -*-mode:clojurescript-*-
+;; the comment above is just a "magic comment" to tell emacs to treat this as a
+;; clojurescript file so it properly highlights code
+;; the contents of the shebang don't matter, it's meant to be read by the os
+;; not by shsl, shsl just has to recognize it and skip ignore it
+
+;; as you may have already guessed comments start with ;
+; single
+;; double
+;;; triple
+;;;;;;;;; doesn't really matter
+
+;; you can define variables as
+(def example-num 10)
+(def example-str "I am a stegosaurus")
+(def example-arr [1 2 3 example-str])
+(def example-map {"one" 1
+                  "two" 2
+                  "ten" example-num})
+
+;; whitespace doens't really matter for separating array/map elements
+;; as long as there's at least one space it's ok
+(def look-mum [
+               "I'm using"
+
+               "only"
+               
+
+               "newlines"
+               ])
+
+;; to call a function you do (<function name> <argsuments>...)
+(println example-num) ;; => 10
+(println example-str) ;; => I am a stegosaurus
+(println example-arr) ;; => [1, 2, 3, I am a stegosaurus]
+(println example-map) ;; => {one:1, two:2, three:3}
+(println look-mum)    ;; => [I'm using, only, newlines]
+
+(println (+ 5 7))
+
+;; by default shsl will see any ( thing thing thing ) as code to make it treat
+;; is as a list you must quote it by putting an apostrophe ' before it
+(def example-lst '(1 2 3))
+
+;; you can also quote symbols, which will return the symbol itself instead of
+;; interpreting it as a variable lookup
+(def example-sym 'hello)
+(println example-sym)
+(println 'example-sym)
+
+;; shsl supports most of the control flow constructs you're used to 
+;; if statements are written as a list (if <condition> <then> <else>)
+(if (== example-num 5)
+  (println example-num "is equal to" 5)
+  (println example-num "is not equal to" 5))

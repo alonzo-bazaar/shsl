@@ -3719,7 +3719,7 @@ void shsl_usage(const char* name, bool print_extra, FILE* restrict stream) {
         "* %s [<flag> [<flag operand>]]+ the flags can be either:\n"
 	"   -e <str>  : evaluates string and prints result\n"
 	"   -f <file> : reads and evaluates everything in file\n"
-	"   -r starts repl\n"
+	"   -r starts a read eval print loop (repl)\n"
 	"   -h prints help message and exits\n";
     static char* extra =
 	"\n"
