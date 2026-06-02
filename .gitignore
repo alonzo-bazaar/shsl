@@ -8,3 +8,4 @@ TAGS
 
 # gdb&Co. shit
 *.h.gch
+vgcore.*

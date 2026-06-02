@@ -1495,10 +1495,8 @@ lexer_pair token_off(char* str) {
     switch(*str) {
 	// comments
     case ';':
-        // make sure to handle end of string as well as end of line
-        while(*str != '\n' && *str != '\0') str++;
-        if(*str == '\n') str++;
-        return token_off(str);
+        while(*str != '\n') str++;
+        return token_off(str+1);
 
 	// parentheses
     case '(':
@@ -3634,7 +3632,6 @@ shsl_ref shsl_eval_str(char* c, shsl_ref env) {
     return curr;
 }
 char* shsl_read_file(const char *path) {
-    // reads entire contents file at path in a null terminated string
     FILE *f = fopen(path, "rb");
     if (f == NULL || fseek(f, 0, SEEK_END) < 0) {
 	fprintf(stderr, "Could not read file %s: %s", path, strerror(errno));
@@ -3673,14 +3670,7 @@ void shsl_eval_file(const char* filepath, shsl_ref env) {
     char* c = shsl_read_file(filepath);
     char* anchor = c;
     // skip shebang if present
-    if(c[0] == '#' && c[1] == '!') {
-        // have to handle special case in which shebang is the only thing
-        // in file so it doesn't end with newline, but with end of file
-        // (since we read everything in a null terminated string this is
-        // marked by '\0')
-        while(*c != '\n' && *c != '\0') c++;
-        if(*c == '\n') c++;
-    }
+    if(c[0] == '#' && c[1] == '!') while(*c != '\n') c++;
     shsl_ref ref = shsl_eval_str(c, env);
     shsl_ref_free_if_unreachable(ref);
     free(anchor);
@@ -3710,28 +3700,22 @@ void shsl_repl(shsl_ref env) {
 void shsl_usage(const char* name, bool print_extra, FILE* restrict stream) {
     static char* msg =
 	"usage\n"
-	"%s [ | [<flag> [<flag operand>]]+ | <file> <file args>* ]\n"
-	"* %s by itself starts a repl\n"
-	"\n"
-	"* %s <file> <file args> runs file <file> passing it <file args>\n"
-	"  in the argv variable\n"
-	"\n"
-        "* %s [<flag> [<flag operand>]]+ the flags can be either:\n"
-	"   -e <str>  : evaluates string and prints result\n"
-	"   -f <file> : reads and evaluates everything in file\n"
-	"   -r starts repl\n"
-	"   -h prints help message and exits\n";
+	"%s [flag [operand]]*\n"
+	"flag [operand] can be either:\n"
+	"  -e [str]  : evaluates string and prints result\n"
+	"  -f [file] : reads and evaluates everything in file\n"
+	"  -r starts repl\n"
+	"  -h prints help message and exits\n";
     static char* extra =
 	"\n"
-	"  multiple <flag> [<flag operand>]s can be put one after the other,\n"
-        "  in which case they will be evaluated in order\n"
+	"multiple flags can be put one after the other and are evaluated in order\n"
 	"\n"
-	"  for instance:\n"
-	"  %s -e \"(def a 10)\" -f file.shsl -r \n"
-	"  will define a to be 10, run file.shsl with a bound to 10,\n"
-	"  and after all that, in the vm where the previous two flags were run,\n"
+	"for instance:\n"
+	"%s -e \"(def a 10)\" -f file.shsl -r \n"
+	"will define a to be 10, run file.shsl with a bound to 10,\n"
+	"and after all that, in the vm where the previous two flags were run,\n"
 	"start a repl\n";
-    fprintf(stream, msg, name, name, name, name);
+    fprintf(stream, msg, name);
     if(print_extra)
 	fprintf(stream, extra, name);
 }
@@ -3756,7 +3740,6 @@ int main(int argc, char** argv) {
     }
 
     // handle ./shsl [file] [args] case (mainly for shebangs)
-    // and ease in passing argv to shsl files
     if(argv[1][0] != '-') { // if first arg is not a flag
 	shsl_eval_file(argv[1], env);
 	goto teardown;

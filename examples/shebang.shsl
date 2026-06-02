@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+;; -*- mode:clojurescript -*-
+;; this is a magic comment to tell emacs how to interpret the contents
+;; of this file (ie: open it as if it were a clojurescript file)
+;; nothing load bearing, just convenience
+
+;; the contents of the shebang don't matter
+;; I'm using bash for shits and giggles
+;; all that matters is that we skip it
+(println "she bang? does she really?")
