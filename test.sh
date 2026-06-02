@@ -132,12 +132,8 @@ assert_shsl_equal 'nil' "(sym? 'nil)"
 assert_shsl_equal 'nil' "(sym? 10)"
 
 assert_shsl_equal '(a b)' "(cons 'a (cons 'b nil))"
-# TODO: this should print 10000
-# check how are we doing function fuckery, qualquadra non cosa
-# (((fn [a] (fn [b] (a a b))) (fn [a] (* a a))) 10)
-# TODO:
-# this prints a at the end for some fucking reason
-# ok it's set returning the key
-# "(let [a 0] (while (< a 10) (println a) (set a (+ a 1))))"
+
+# lambda fuckery
+assert_shsl_equal '10000' "(((fn [a] (fn [b] (a (a b)))) (fn [a] (* a a))) 10)"
 
 echo "if you see this and nothing blew up then all tests pass!"

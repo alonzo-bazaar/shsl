@@ -21,6 +21,10 @@
 #include<assert.h>
 #include<errno.h>
 
+// for fork/exec
+#include<unistd.h>
+#include<sys/wait.h>
+
 // dumb utilities
 #define defstruct(s) struct s; typedef struct s s
 
@@ -219,6 +223,7 @@ shsl_ref shsl_nth(shsl_ref list_ref, size_t n);
 // ssize_t so we can use -1 as "bro what the fuck is this object"
 ssize_t shsl_list_length(shsl_ref list_ref);
 char* shsl_sym_name(shsl_ref sym_ref);
+
 long shsl_int(shsl_ref ref);
 double shsl_real(shsl_ref ref);
 
@@ -2791,7 +2796,7 @@ shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
             shsl_ref inner_env =
                 shsl_mkcons
                 (shsl_env_mkframe(fn.ptr->user_fn.lambda_list->positional, args),
-                 env);
+                 fn.ptr->user_fn.env);
 
 	    shsl_ref_add(inner_env);
             shsl_ref res = shsl_eval_sequence(fn.ptr->user_fn.body,
@@ -3291,6 +3296,69 @@ shsl_defun(shsl_builtin_println, "println", args, env, {
 	return shsl_fn_arg(0);
     })
 
+shsl_defun(shsl_builtin_fnenv, "fnenv", args, env, {
+	(void)env;
+	shsl_fn_assert_argslen(== 1);
+	shsl_fn_assert(shsl_is_fn(shsl_fn_arg(0)));
+
+	return shsl_fn_env(shsl_fn_arg(0));
+    })
+
+shsl_ref shsl_exec(shsl_ref command) {
+    assert(shsl_is_vec(command));
+    size_t size = shsl_vec_length(command);
+    if(size == 0)
+	return shsl_mkerr(shsl_ref_to_nil(),
+			  "in function exec: no arguments were provided!");
+
+    shsl_vec_foreach(i, command_elt, command)
+	if(!shsl_is_str(command_elt))
+	    return shsl_mkerr(command,
+			      "provided command must be a string vector but " 
+			      "element at position %zu is not a string, cannot "
+			      "run this as a command", i);
+
+    // child program name
+    const char* const child_prog = shsl_vec_get(command, 0).ptr->str;
+
+    // child program args
+    char* child_args[size+1];
+    for(size_t i = 0; i<size; ++i)
+	child_args[i] = shsl_vec_get(command, i).ptr->str;
+    // arguments must be a null terminated vector for the execvp function
+    child_args[size] = (char*)NULL;
+    // fork and exec
+    pid_t pid = fork();
+    if(pid) {
+	// we'll overwrite this int and the initial value isn't that important
+	// we just set it to a random -1 avoid having any uninitialized data
+	int child_return_status = -1;
+	waitpid(pid, &child_return_status, 0);
+	if(child_return_status == 0)
+	    return shsl_mksym("t");
+	return shsl_mkerr(shsl_mkint(child_return_status),
+			  "child process returned with error status");
+    } else {
+	execvp(child_prog, child_args);
+	return shsl_mkerr(shsl_mkint(errno),
+			  "fucked something up in the child process");
+    }
+}
+
+shsl_defun(shsl_builtin_exec, "exec", args, env, {
+	// TODO: guess who ain't supporting windows rn :|
+	(void)env;
+	shsl_fn_assert_argslen(>= 1);
+	return shsl_exec(args);
+    })
+shsl_defun(shsl_builtin_exec_vec, "exec-vec", args, env, {
+	// TODO: guess who ain't supporting windows rn :|
+	(void)env;
+	shsl_fn_assert_argslen(== 1);
+	shsl_fn_assert_argtype(0, SHSL_VEC);
+	return shsl_exec(shsl_fn_arg(0));
+    })
+
 shsl_ref shsl_make_initial_env(void) {
     shsl_ref frame_obj = shsl_mkmap(20);
     shsl_ref env_obj = shsl_mkcons(frame_obj, shsl_ref_to_nil());
@@ -3395,10 +3463,16 @@ shsl_ref shsl_make_initial_env(void) {
     shsl_map_set(frame_obj, shsl_mksym("println"),
 		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_println));
 
+    // system functions
+    shsl_map_set(frame_obj, shsl_mksym("exec"),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_exec));
+    shsl_map_set(frame_obj, shsl_mksym("exec-vec"),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_exec_vec));
+
     // introspection functions
     // get the environment as a list lol
-    // wait I cannot do that with lexical scoping
-    // this is gonna have to be a special form :| 
+    shsl_map_set(frame_obj, shsl_mksym("fnenv"),
+		 shsl_mkbuiltin_fn(env_obj, shsl_builtin_fnenv));
 
     // avoid circular references
     for(size_t i = 0; i<frame_obj.ptr->map.size; ++i) {
