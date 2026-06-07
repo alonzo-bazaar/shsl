@@ -80,7 +80,7 @@ defstruct(shsl_user_fn);
 // references are ususally allocated on the stack
 defstruct(shsl_ref);
 
-shsl_obj SHSL_GLOBAL_NIL;
+extern shsl_obj SHSL_GLOBAL_NIL;
 shsl_ref shsl_ref_to_nil(void);
 
 /// REFERENCE OPERATIONS DECLARATIONS
@@ -465,9 +465,9 @@ shsl_ref shsl_make_initial_env(void);
 
 //// PRINT DEBUGGING DECLARATIONS
 //// ----------------------------------------------------------------------------
-void shsl_dbg_fputtok(const shsl_token* tok, FILE* restrict stream);
-void shsl_fpr(const shsl_ref obj, FILE* restrict stream);
-void shsl_fprint(const shsl_ref obj, FILE* restrict stream);
+void shsl_dbg_fputtok(const shsl_token* tok, FILE* stream);
+void shsl_fpr(const shsl_ref obj, FILE* stream);
+void shsl_fprint(const shsl_ref obj, FILE* stream);
 
 //// USER FACING FUNCTIONS DECLARATIONS
 //// ----------------------------------------------------------------------------
@@ -757,7 +757,7 @@ shsl_ref shsl_mkreal(double d) {
 }
 shsl_ref shsl_mkstr(const char* str) {
     size_t len = strlen(str);
-    char* c = calloc(len+1, sizeof(char));
+    char* c = (char*)calloc(len+1, sizeof(char));
     strcpy(c, str);
     return_mallocd_obj(.ref_count = 0, .type = SHSL_STR, .str = c);
 }
@@ -784,8 +784,8 @@ shsl_ref shsl_vmkerr(shsl_ref data, const char* msg, va_list args) {
     return_mallocd_obj(.ref_count = 0,
 		       .type = SHSL_ERR,
 		       .err = (shsl_err) {
-			   .msg = shsl_ref_add(shsl_mkstr(buf)),
 			   .data = shsl_ref_add(data),
+			   .msg = shsl_ref_add(shsl_mkstr(buf)),
 		       });
 }
 shsl_ref shsl_mkerr(shsl_ref data, const char* msg, ...) {
@@ -807,7 +807,7 @@ shsl_ref shsl_mkvec(size_t initial_capacity) {
     return_mallocd_obj(.ref_count = 0,
 		       .type = SHSL_VEC,
 		       .vec = (shsl_vec) {
-			   .buf = calloc(initial_capacity, sizeof(shsl_ref)),
+			   .buf = (shsl_ref*)calloc(initial_capacity, sizeof(shsl_ref)),
 			   .size = 0,
 			   .capacity = initial_capacity,
 		       },
@@ -817,7 +817,7 @@ shsl_ref shsl_mkmap(size_t initial_capacity) {
     return_mallocd_obj(.ref_count = 0,
 		       .type = SHSL_MAP,
 		       .map = (shsl_map){
-			   .buf = calloc(initial_capacity, sizeof(shsl_kv)),
+			   .buf = (shsl_kv*)calloc(initial_capacity, sizeof(shsl_kv)),
 			   .size = 0,
 			   .capacity = initial_capacity,
 		       }
@@ -1089,7 +1089,7 @@ void shsl_vec_expand(shsl_ref vec_ref, size_t new_size) {
     assert(shsl_is_vec(vec_ref));
 
     if(vec_ref.ptr->vec.capacity >= new_size) return;
-    vec_ref.ptr->vec.buf = reallocarray
+    vec_ref.ptr->vec.buf = (shsl_ref*)reallocarray
         (vec_ref.ptr->vec.buf, new_size, sizeof(shsl_ref));
     vec_ref.ptr->vec.capacity = new_size;
 }
@@ -1132,7 +1132,7 @@ void shsl_map_expand(shsl_ref map_ref, size_t new_size) {
     assert(shsl_is_map(map_ref));
 
     if (map_ref.ptr->map.capacity >= new_size) return;
-    map_ref.ptr->map.buf = reallocarray
+    map_ref.ptr->map.buf = (shsl_kv*)reallocarray
         (map_ref.ptr->map.buf, new_size, sizeof(shsl_kv));
     map_ref.ptr->map.capacity = new_size;
 }
@@ -1175,18 +1175,22 @@ void shsl_map_set(shsl_ref map_ref, shsl_ref key, shsl_ref new_val) {
 }
 
 /// COLLECTION BUILDERS DEFINITIONS
+typedef struct shsl_cons_builder {
+    shsl_ref first; shsl_ref last;
+} shsl_cons_builder;
+typedef struct shsl_vec_builder {
+    shsl_ref vec;
+} shsl_vec_builder;
+typedef struct shsl_map_builder {
+    shsl_ref map; shsl_ref curr_key; bool reading_key;
+} shsl_map_builder;
+
 typedef struct shsl_cb {
     SHSL_CB_TYPE type;
     union {
-        struct {
-            shsl_ref first; shsl_ref last;
-        } cons_builder;
-        struct {
-            shsl_ref vec;
-        } vec_builder;
-        struct {
-            shsl_ref map; shsl_ref curr_key; bool reading_key;
-        } map_builder;
+	shsl_cons_builder cons_builder;
+	shsl_vec_builder vec_builder;
+	shsl_map_builder map_builder;
     };
 } shsl_cb;
 shsl_cb shsl_cb_make(SHSL_CB_TYPE type) {
@@ -1194,20 +1198,26 @@ shsl_cb shsl_cb_make(SHSL_CB_TYPE type) {
     case SHSL_CB_LIST:
 	return (shsl_cb) {
 	    .type = SHSL_CB_LIST,
-	    .cons_builder.first = shsl_ref_to_nil(),
-	    .cons_builder.last = shsl_ref_to_nil(),
+	    .cons_builder = (shsl_cons_builder) {
+		.first = shsl_ref_to_nil(),
+		.last = shsl_ref_to_nil(),
+	    }
 	};
     case SHSL_CB_VEC:
 	return (shsl_cb) {
 	    .type = SHSL_CB_VEC,
-	    .vec_builder.vec = shsl_mkvec(1),
+	    .vec_builder = (shsl_vec_builder){
+		.vec = shsl_mkvec(1),
+	    }
 	};
     case SHSL_CB_MAP:
 	return (shsl_cb) {
 	    .type = SHSL_CB_MAP,
-	    .map_builder.map = shsl_mkmap(1),
-	    .map_builder.reading_key = true,
-	    .map_builder.curr_key = shsl_ref_to_nil(),
+	    .map_builder = (shsl_map_builder) {
+		.map = shsl_mkmap(1),
+		.curr_key = shsl_ref_to_nil(),
+		.reading_key = true,
+	    }
 	};
     }
     assert(0 && "unreachable");
@@ -1404,7 +1414,11 @@ lexer_pair error_lexer_pair(const char* errmsg) {
 // special characters are chars that once encountered you go like
 // "ok, I'm done with the current thing, this character starts the next thing"
 bool is_special_char(char c) {
-    char* s = "()[]{}'`,\"";
+    const char special[] = {'(', ')',
+			    '[', ']',
+			    '{', '}',
+			    '\\', ',', '`', '\'', '"', '\0'};
+    const char* s = &special[0];
     while(*s!='\0' && *s!=c) s++;
     return *s!='\0';
 }
@@ -1440,7 +1454,7 @@ bool try_parse_integer(char* c, size_t len, long* into) {
 }
 // copy characters from c to c+len into a fresh null terminated string
 char* slice_to_fresh_str(const char* c, size_t len) {
-    char* fresh = calloc(len+1, sizeof(char));
+    char* fresh = (char*)calloc(len+1, sizeof(char));
     memcpy(fresh, c, len);
     fresh[len] = '\0';
     return fresh;
@@ -1548,7 +1562,7 @@ lexer_pair token_off(char* str) {
 	else {
 	    size_t len = (c-str);
 	    // remove beginning and ending '"' and add null terminator
-	    char* s = calloc(len, sizeof(char));
+	    char* s = (char*)calloc(len, sizeof(char));
 	    memcpy(s, str+1, len);
 	    s[len-1] = '\0';
 	    lexer_pair lp = (lexer_pair) {
@@ -1679,7 +1693,7 @@ parser_pair parse_off(char* str) {
 	};
 
     case SHSL_TOK_EOF:
-	return (parser_pair){0};
+	return ((parser_pair){0});
     }
     assert(0 && "unreachable");
 }
@@ -1714,7 +1728,7 @@ parser_pair parse_until(char* str,
 			: error_on[i] == SHSL_TOK_CLOSE_SQUARE ? "]"
 			: error_on[i] == SHSL_TOK_CLOSE_CURLY ? "}"
 			: "WTF BRO");
-		return (parser_pair){0};
+		return ((parser_pair){0});
 	    }
 
 	// append parsed object to acc list
@@ -1880,7 +1894,7 @@ shsl_expr** shsl_form_list_to_expr_arr(shsl_ref form) {
     // (map 'vector #'form-to-expr form)
     assert(shsl_is_list(form));
     size_t len = shsl_list_length(form);
-    shsl_expr** res = calloc(len, sizeof(shsl_expr*));
+    shsl_expr** res = (shsl_expr**)calloc(len, sizeof(shsl_expr*));
     for(size_t i = 0; i<len; ++i) {
 	res[i] = shsl_form_to_expr(shsl_nth(form, i));
     }
@@ -1917,7 +1931,7 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
 			    .lookup_symbol = shsl_ref_add(form));
 
     case SHSL_VEC: {
-	shsl_expr** elt_exprs = calloc(shsl_vec_length(form), sizeof(shsl_expr*));
+	shsl_expr** elt_exprs = (shsl_expr**)calloc(shsl_vec_length(form), sizeof(shsl_expr*));
 
 	// can't use shsl_form_list_to_expr_arr as vector forms aren't lists
 	shsl_vec_foreach(i, form_elt, form) {
@@ -1943,8 +1957,8 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
     }
 
     case SHSL_MAP: {
-	shsl_expr** key_exprs = calloc(form.ptr->map.size, sizeof(shsl_expr*));
-	shsl_expr** val_exprs = calloc(form.ptr->map.size, sizeof(shsl_expr*));
+	shsl_expr** key_exprs = (shsl_expr**)calloc(form.ptr->map.size, sizeof(shsl_expr*));
+	shsl_expr** val_exprs = (shsl_expr**)calloc(form.ptr->map.size, sizeof(shsl_expr*));
 
 	for(size_t i = 0; i<form.ptr->map.size; ++i) {
 	    shsl_expr* next_key = shsl_form_to_expr(form.ptr->map.buf[i].k);
@@ -2055,7 +2069,7 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
 		if(form_length == 4)
 		    e = body[2];
 		else {
-		    e = malloc(sizeof(shsl_expr));
+		    e = (shsl_expr*)malloc(sizeof(shsl_expr));
 		    *e = (shsl_expr) {
 			.type = SHSL_EXPR_LITERAL,
 			.literal = shsl_ref_to_nil(),
@@ -2105,7 +2119,7 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
 		for(size_t i = 0; i<shsl_vec_length(binds_vec); i+=2)
 		    shsl_vec_push(keys,shsl_vec_get(binds_vec, i));
 
-		shsl_expr** vals = calloc(binds_length/2, sizeof(shsl_expr*)); 
+		shsl_expr** vals = (shsl_expr**)calloc(binds_length/2, sizeof(shsl_expr*)); 
 		for(size_t i = 1; i<shsl_vec_length(binds_vec); i+=2) {
 		    shsl_expr* next =
 			shsl_form_to_expr(shsl_vec_get(binds_vec, i));
@@ -2259,7 +2273,7 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
                     }
 
                 // we currently only support positional shit so...
-                shsl_lambda_list* ll = malloc(sizeof(shsl_lambda_list));
+                shsl_lambda_list* ll = (shsl_lambda_list*)malloc(sizeof(shsl_lambda_list));
                 ll->positional = shsl_ref_add(shsl_nth(form, 1));
                 ll->optional = shsl_ref_add(shsl_mkmap(1));
                 ll->keyword = shsl_ref_add(shsl_mkmap(1));
@@ -2491,7 +2505,7 @@ shsl_expr* shsl_expr_copy(shsl_expr* orig) {
              .lookup_symbol = shsl_ref_add(shsl_copy(orig->literal)));
     case SHSL_EXPR_VEC: {
         size_t size = orig->vec_expr.size;
-        shsl_expr** elts = calloc(size, sizeof(shsl_expr*));
+        shsl_expr** elts = (shsl_expr**)calloc(size, sizeof(shsl_expr*));
         for(size_t i = 0; i<size; ++i)
             elts[i] = shsl_expr_copy(orig->vec_expr.elts[i]);
 
@@ -2503,8 +2517,8 @@ shsl_expr* shsl_expr_copy(shsl_expr* orig) {
     }
     case SHSL_EXPR_MAP: {
         size_t size = orig->map_expr.size;
-        shsl_expr** keys = calloc(size, sizeof(shsl_expr*));
-        shsl_expr** vals = calloc(size, sizeof(shsl_expr*));
+        shsl_expr** keys = (shsl_expr**)calloc(size, sizeof(shsl_expr*));
+        shsl_expr** vals = (shsl_expr**)calloc(size, sizeof(shsl_expr*));
         for(size_t i = 0; i<size; ++i) {
             keys[i] = shsl_expr_copy(orig->map_expr.keys[i]);
             vals[i] = shsl_expr_copy(orig->map_expr.vals[i]);
@@ -2526,7 +2540,7 @@ shsl_expr* shsl_expr_copy(shsl_expr* orig) {
              });
     case SHSL_EXPR_DO: {
         size_t body_length = orig->do_expr.body_length;
-        shsl_expr** body = calloc(body_length, sizeof(shsl_expr*));
+        shsl_expr** body = (shsl_expr**)calloc(body_length, sizeof(shsl_expr*));
         for(size_t i = 0; i<body_length; ++i)
             body[i] = shsl_expr_copy(orig->do_expr.body[i]);
 
@@ -2539,7 +2553,7 @@ shsl_expr* shsl_expr_copy(shsl_expr* orig) {
     }
     case SHSL_EXPR_DO_POKING: {
         size_t body_length = orig->do_poking_expr.body_length;
-        shsl_expr** body = calloc(body_length, sizeof(shsl_expr*));
+        shsl_expr** body = (shsl_expr**)calloc(body_length, sizeof(shsl_expr*));
         for(size_t i = 0; i<body_length; ++i)
             body[i] = shsl_expr_copy(orig->do_poking_expr.body[i]);
 
@@ -2552,12 +2566,12 @@ shsl_expr* shsl_expr_copy(shsl_expr* orig) {
     }
     case SHSL_EXPR_LET: {
         size_t body_length = orig->let_expr.body_length;
-        shsl_expr** body = calloc(body_length, sizeof(shsl_expr*));
+        shsl_expr** body = (shsl_expr**)calloc(body_length, sizeof(shsl_expr*));
         for(size_t i = 0; i<body_length; ++i)
             body[i] = shsl_expr_copy(orig->let_expr.body[i]);
 
         size_t binds_length = orig->let_expr.binds_length;
-        shsl_expr** vals = calloc(binds_length, sizeof(shsl_expr*));
+        shsl_expr** vals = (shsl_expr**)calloc(binds_length, sizeof(shsl_expr*));
         for(size_t i = 0; i<binds_length; ++i)
             vals[i] = shsl_expr_copy(orig->let_expr.vals[i]);
 
@@ -2574,7 +2588,7 @@ shsl_expr* shsl_expr_copy(shsl_expr* orig) {
 
     case SHSL_EXPR_WHILE: {
         size_t body_length = orig->while_expr.body_length;
-        shsl_expr** body = calloc(body_length, sizeof(shsl_expr*));
+        shsl_expr** body = (shsl_expr**)calloc(body_length, sizeof(shsl_expr*));
         for(size_t i = 0; i<body_length; ++i)
             body[i] = shsl_expr_copy(orig->while_expr.body[i]);
 
@@ -2602,10 +2616,10 @@ shsl_expr* shsl_expr_copy(shsl_expr* orig) {
 	     });
     case SHSL_EXPR_FN: {
         size_t body_length = orig->fn_expr.body_length;
-        shsl_expr** body = calloc(body_length, sizeof(shsl_expr*));
+        shsl_expr** body = (shsl_expr**)calloc(body_length, sizeof(shsl_expr*));
         for(size_t i = 0; i<body_length; ++i)
             body[i] = shsl_expr_copy(orig->fn_expr.body[i]);
-	shsl_lambda_list* lambda_list = malloc(sizeof(shsl_lambda_list));
+	shsl_lambda_list* lambda_list = (shsl_lambda_list*)malloc(sizeof(shsl_lambda_list));
 	lambda_list->positional=
 	    shsl_ref_add(shsl_copy(orig->fn_expr.lambda_list->positional));
 	lambda_list->optional=
@@ -2625,7 +2639,7 @@ shsl_expr* shsl_expr_copy(shsl_expr* orig) {
         assert(0 && "TODO: copy macro expression");
     case SHSL_EXPR_FUNCALL: {
         size_t args_length = orig->funcall_expr.args_length;
-        shsl_expr** args = calloc(args_length, sizeof(shsl_expr*));
+        shsl_expr** args = (shsl_expr**)calloc(args_length, sizeof(shsl_expr*));
         for(size_t i = 0; i<args_length; ++i)
             args[i] = shsl_expr_copy(orig->funcall_expr.args[i]);
 
@@ -2822,7 +2836,7 @@ shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
     }
     case SHSL_EXPR_FN: {
         size_t body_length = expr->fn_expr.body_length;
-        shsl_expr** body = calloc(body_length, sizeof(shsl_expr*));
+        shsl_expr** body = (shsl_expr**)calloc(body_length, sizeof(shsl_expr*));
         for(size_t i = 0; i<body_length; ++i)
             body[i] = shsl_expr_copy(expr->fn_expr.body[i]);
 
@@ -2831,7 +2845,7 @@ shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
         // this would be a first n which we return data that was partially
         // in an expression
         shsl_lambda_list* lambda_list =
-            malloc(sizeof(shsl_lambda_list));
+            (shsl_lambda_list*)malloc(sizeof(shsl_lambda_list));
         lambda_list->positional = shsl_ref_add
             (expr->fn_expr.lambda_list->positional);
         lambda_list->optional = shsl_ref_add
@@ -3488,7 +3502,7 @@ shsl_ref shsl_make_initial_env(void) {
 
 //// PRINT DEBUGGING DEFINITIONS
 //// ----------------------------------------------------------------------------
-void shsl_dbg_fputtok(const shsl_token* tok, FILE* restrict stream) {
+void shsl_dbg_fputtok(const shsl_token* tok, FILE* stream) {
     fputs("token ", stream);
     switch(tok->type) {
     case SHSL_TOK_NIL:
@@ -3543,7 +3557,7 @@ void shsl_dbg_fputtok(const shsl_token* tok, FILE* restrict stream) {
 }
 
 // TODO: an "object to string" function would be far more useful
-void shsl_fpr(const shsl_ref ref, FILE* restrict stream) {
+void shsl_fpr(const shsl_ref ref, FILE* stream) {
     // pr prints symbols in such a way that they could be read back by the
     // shsl reader
     switch(shsl_type(ref)) {
@@ -3621,7 +3635,7 @@ void shsl_fpr(const shsl_ref ref, FILE* restrict stream) {
     };
 }
 
-void shsl_fprint(const shsl_ref ref, FILE* restrict stream) {
+void shsl_fprint(const shsl_ref ref, FILE* stream) {
     // print, unlike pr, PRINTs data for human consumption
     switch(shsl_type(ref)) {
     case SHSL_INT:
@@ -3756,7 +3770,7 @@ char* shsl_read_file(const char *path) {
 	return NULL;
     }
 
-    char* contents = calloc(m+1, sizeof(char));
+    char* contents = (char*)calloc(m+1, sizeof(char));
     fread((void*)contents, m, 1, f);
     contents[m] = '\0';
 
@@ -3809,7 +3823,7 @@ void shsl_repl(shsl_ref env) {
 
 #ifdef SHSL_MAIN
 
-void shsl_usage(const char* name, bool print_extra, FILE* restrict stream) {
+void shsl_usage(const char* name, bool print_extra, FILE* stream) {
     static char* msg =
 	"usage\n"
 	"%s [ | [<flag> [<flag operand>]]+ | <file> <file args>* ]\n"
