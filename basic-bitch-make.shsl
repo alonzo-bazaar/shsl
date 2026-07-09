@@ -1,0 +1,40 @@
+#!./shsl
+;; -*- mode:clojurescript -*-
+(def cc "gcc")
+
+(def common-cflags ["-Wall" "-Wextra" "-Wpedantic" "-Wswitch" "-Wno-parentheses"
+                    "-Werror"
+                    "-O0" "-g3" "-ggdb"])
+
+(println "\begin{compiling library tests}")
+(exec-vec
+ (vec-cat
+  [cc]
+  common-cflags
+  ;["-DSHSL_LOG_ERROR" "-DSHSL_LOG_ERROR_EXPR"]
+  ;["-DSHSL_LOG_TESTS"]
+  ["-o" "tests" "tests.c"]))
+(println "\end{compiling library tests}")
+(println "")
+
+(println "\begin{running library tests}")
+(exec-vec ["./tests"])
+(println "\end{running library tests}")
+(println "")
+
+(println "\begin{compiling shsl executable}")
+(exec-vec
+ (vec-cat
+  [cc]
+  common-cflags
+  ["-DSHSL_LOG_ERROR" "-DSHSL_LOG_ERROR_EXPR"]
+  ["-o" "shsl" "shsl.c"]))
+(println "\end{compiling shsl executable}")
+(println "")
+
+(println "\begin{running shell tests}")
+(exec-vec ["./test.sh"])
+(println "\end{running shell tests}")
+(println "")
+
+(println "if nothing above aborted all tests pass!")

@@ -1,0 +1,64 @@
+;; -*- mode:clojurescript -*-
+(def sequential?
+  (fn [coll]
+    (or (list? coll) (str? coll) (vec? coll))))
+
+;; TODO: gonna need a sepecialized version for lists
+(def index-of
+  (fn [needle seq]
+    (if (not (sequential? seq))
+      (err "not sequential collection, cannot look for indices"
+           {"was looking in" seq "for needle" needle})
+      (let [i 0
+            l (count seq)]
+        ;; we don't have macros yet
+        ;; which means we don't have a short circuiting `and' yet
+        ;; which means we gotta resort to this rahter ugly hack for a while
+        (while (if (>= i l) nil (!= (nth seq i) needle))
+          (set i (+ i 1)))
+        (if (= i l) nil i)))))
+
+(def index-if
+  (fn [pred seq]
+    (if (not (sequential? seq))
+      (err "not sequential collection, cannot look for indices" seq
+           {"was looking in" seq "for function satisfying" pred})
+      ;; shsl is currently rather... primitive
+      ;; so we're using this very c style 
+      (let [i 0
+            l (count seq)]
+        (while (if (>= i l) nil (!= (nth seq i) needle))
+          (set i (+ i 1)))
+        (if (= i l) nil i)))))
+
+(def param-index
+  (fn [p]
+    (index-if (fn [x] (starts-with x (cat p "="))) argv)))
+
+(def param-value
+  (let [pi (param-index p)]
+    (if pi
+      (nth (split (nth argv i) "=") 1)
+      nil)))
+
+(def arg? (fn [arg]
+            (contains? argv arg)))
+
+(def map-vec
+  (fn [fn seq]
+    ;; TODO
+    ))
+(def map-lst
+  (fn [fn seq]
+    ;; TODO
+    ))
+(def map-map
+  (fn [fn seq]
+    ;; TODO
+    ))
+
+(def map
+  (fn [fn seq]
+    (if (vec? seq) (map-vec fn seq)
+        (if (list? seq) (map-list fn seq)
+            (if (map? seq) (map-map fn seq))))))

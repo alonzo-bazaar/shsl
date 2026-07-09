@@ -14,14 +14,16 @@ build_clean_shsl() {
     shsl_build_result=$?
 }
 
-build_clean_shsl
-if [[ shsl_build_result ]]; then
-    echo ""
-    echo "successfully built shsl! now testing it"
-else
-    echo ""
-    echo "shsl build exited with error! not proceeding further"
-    exit "$shsl_build_result"
+if false; then
+    build_clean_shsl
+    if [[ shsl_build_result ]]; then
+        echo ""
+        echo "successfully built shsl! now testing it"
+    else
+        echo ""
+        echo "shsl build exited with error! not proceeding further"
+        exit "$shsl_build_result"
+    fi
 fi
 
 assert_shsl_equal() {

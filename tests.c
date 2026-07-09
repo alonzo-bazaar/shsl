@@ -159,7 +159,7 @@ void test_some_shit(void) {
 	   && "conditional returning symbol literal didn't return symbol");
     shsl_free(b);
 
-    shsl_ref env = shsl_make_initial_env();
+    shsl_ref env = shsl_env_make_initial();
     shsl_ref c = shsl_eval_str("(+ 2 2)", env);
     assert(shsl_is_int(c) && "2+2 didn't return an integer");
     assert(int_eq(4, c) && "2+2 should equal 4");

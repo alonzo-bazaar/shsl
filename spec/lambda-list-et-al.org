@@ -1,0 +1,13 @@
+* lambda list structure
+- positional arguments, symbols
+
+- we don't have optional arguments as that's handled by multimethods
+  (we don't have multimethods yet but fuck it)
+
+- after positional, optionally, keywords
+  all keyword args have default values, if no default value is specified, the default value is set to nil
+
+- after kwargs (or, if no kwargs were present, after positional) optional rest arg 
+  the rest arg is a random ass sequence, could be a list, could be an array, who gives a shit
+
+* lambda list binding

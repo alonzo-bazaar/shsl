@@ -175,7 +175,6 @@ The following is a [[https://learnxinyminutes.com/][learnxinyminutes]] style run
 - ~shsl.h~ :: the master file, the entire langauge is defined in here
 - ~shsl.c~ :: thin main function
 - ~Makefile~ :: Makefile
-- ~mods/~ :: extra modules for shsl where all the various system functions are defined
 - ~examples/~ :: various examples of shsl scripts, all the scripts in this directory can be run with the current shsl version
 - ~ramblings/~ :: various notes to self I felt the need to version
 - ~docs/~ :: (currently absent) documentation

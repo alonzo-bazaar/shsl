@@ -1,0 +1,22 @@
+* types
+** atomic
+- int
+- float
+- character
+- string (strings are not character arrays (yet))
+- symbol
+- keyword (special kind of symbol)
+- functions
+- c pointers(?)
+- namespaces(?)
+- atom/ref/mutable shit(?)
+
+** composite
+- pair (cons)
+- error (represented as pair with different type tag)
+
+** collections (coollections count as composite)
+- set (not implemented yet)
+- map (not hash yet)
+- vec (not immutable yet)
+- list (special use of pair)
