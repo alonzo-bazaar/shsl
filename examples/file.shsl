@@ -1,3 +1,4 @@
+;; -*- mode:clojurescript -*-
 ;; comment at the start
 (def a 10)
 (def b 20)

@@ -4,7 +4,7 @@
 ;; of this file (ie: open it as if it were a clojurescript file)
 ;; nothing load bearing, just convenience
 
-;; the contents of the shebang don't matter
-;; I'm using bash for shits and giggles
+;; the contents of the shebang don't matter unless you call this file like ./shebang.shsl
+;; I'm using /usr/bin/env bash for shits and giggles
 ;; all that matters is that we skip it
 (println "she bang? does she really?")
