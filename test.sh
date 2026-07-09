@@ -61,16 +61,16 @@ assert_shsl_equal '-1' "(- 2 3)" "subtraction order"
 
 # literals (warning: depends on pretty printing used)
 assert_shsl_equal '(a b c d)' "'(a b c d)" "quoted litst"
-assert_shsl_equal '[a, b, c, d]' "'[a b c d]" "quoted vector literals"
-assert_shsl_equal '{a:b, c:d}' "'{a b c d}" "quoted map literals"
+assert_shsl_equal '[a b c d]' "'[a b c d]" "quoted vector literals"
+assert_shsl_equal '{a b c d}' "'{a b c d}" "quoted map literals"
 
 # evaluating maps and vectors
-assert_shsl_equal '[1, 2, 3, 4]' "[1 2 3 4]" "unquoted vectors"
-assert_shsl_equal '{1:2, 3:4}' "{1 2 3 4}" "unquoted maps"
-assert_shsl_equal '[1, 2, 3, 10]' "[1 2 3 (+ 5 5)]"\
+assert_shsl_equal '[1 2 3 4]' "[1 2 3 4]" "unquoted vectors"
+assert_shsl_equal '{1 2 3 4}' "{1 2 3 4}" "unquoted maps"
+assert_shsl_equal '[1 2 3 10]' "[1 2 3 (+ 5 5)]"\
 		  "unquoted vectors with computed elements"
-assert_shsl_equal '{1:2, 10:4}' "{1 2 (+ 6 4) 4}" "unquoted maps with computed keys"
-assert_shsl_equal '{1:2, 3:10}' "{1 2 3 (+ 6 4)}" "unquoted maps with computed values"
+assert_shsl_equal '{1 2 10 4}' "{1 2 (+ 6 4) 4}" "unquoted maps with computed keys"
+assert_shsl_equal '{1 2 3 10}' "{1 2 3 (+ 6 4)}" "unquoted maps with computed values"
 
 assert_shsl_equal '[]' "[]" "empty vector"
 assert_shsl_equal '[]' "'[]" "empty quoted vector"
@@ -106,8 +106,8 @@ assert_shsl_equal $'you\nfuck\nfuck' "(do (println 'you) (println 'fuck))" "do b
 
 # let blocks
 assert_shsl_equal '10' "(def a 10) (let [a [1 2 3]] a) a"
-assert_shsl_equal '[1, 2, 3]' "(def a [1 2 3]) (let [a 10] a) a"
-assert_shsl_equal '[1, 2, 3]' "(def a 10) (let [a [1 2 3]] a)"
+assert_shsl_equal '[1 2 3]' "(def a [1 2 3]) (let [a 10] a) a"
+assert_shsl_equal '[1 2 3]' "(def a 10) (let [a [1 2 3]] a)"
 assert_shsl_equal '10' "(def a [1 2 3]) (let [a 10] a)"
 
 # if then else

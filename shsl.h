@@ -1,7 +1,8 @@
 //// FILE HEADER
 //// ----------------------------------------------------------------------------
 // SHSL: Single Header Scripting (Library|Language|Layer|Lisp)
-// scripting language localized entirely within a C header file
+// embeddable interpreter for a small lisp language
+// localized entirely within a C header file
 // shsl is distributed under the GNU LGPL v2.1 (see LICENSE file for details)
 // author: Alonzo Bazaar <alonzo.lo.stronzo@protonmail.com>
 // (that is indeed a pseudonym)
@@ -23,10 +24,76 @@
 #include<unistd.h>
 #include<sys/wait.h>
 
-// dumb utilities
+//// DUMB UTILITIES DECLARATIONS
+//// ----------------------------------------------------------------------------
+// 
+// I'm putting all the utils&Co. upfront instead of putting them closer to where
+// they're used as to avoid interspersing utility code with more business
+// logicky code, there still are utilities in the business logicky parts of this
+// codebase, of course, but they're utilities pertaining to the business logic
+// 
+// these first utilities are instead completely unrelated to the fact they're
+// part of shsl and are just a bunch of functions that were nice to have for this
+// so I added em to here
+
+/// NAMESPACING UTILITIES DECLARATIONS (preprocessor abuse)
 #define defstruct(s) struct s; typedef struct s s
 
-//// DATA DECLARATIONS
+/// GENERIC PREPROCESSOR ABUSE
+// adapted from
+// https://groups.google.com/g/comp.std.c/c/d-6Mj5Lko_s?pli=1
+// found in the second anser to
+// https://stackoverflow.com/questions/2124339/
+// C++ preprocessor __VA_ARGS__ number of arguments
+// 
+// from 1 to 29 arguments, this macro will return the number of arguments
+// passed to the macro
+#define SHSL_ARG_COUNT(...) SHSL_EXTRACT_30TH_IN        \
+    (__VA_ARGS__,                                       \
+     29,28,27,26,25,24,23,22,21,20,                     \
+     19,18,17,16,15,14,13,12,11,10,                     \
+     9,8,7,6,5,4,3,2,1)
+// if __VA_ARGS__ has 1 element __VA_ARGS__, 29, 28, ... will have 30 args
+// and the 30th will be 1
+//
+// with 2 argument the sequence will have 31 args
+// and the 30th will be 2
+//
+// with 3 argument the sequence will have 32 args
+// and the 30th will be 3
+// 
+// so the 30th argument of __VA_ARGS__, 29, 28... is always the amount of
+// arguments that were present in __VA_ARGS__
+// 
+// to extract the 30th element in an argument list we quite "simply"
+#define SHSL_EXTRACT_30TH_IN(_01, _02, _03, _04, _05,   \
+                             _06, _07, _08, _09, _10,   \
+                             _11, _12, _13, _14, _15,   \
+                             _16, _17, _18, _19, _20,   \
+                             _21, _22, _23, _24, _25,   \
+                             _26, _27, _28, _29, _30,   \
+                             ...) _30
+
+/// CHARACTER AND STRING HANDLING DECLARATIONS
+defstruct(shsl_string_builder);
+void shsl_sb_push(shsl_string_builder* sb, const char c);
+void shsl_sb_push_nullt_str(shsl_string_builder* sb, const char* c);
+void shsl_sb_push_sized_str(shsl_string_builder* sb, const char* c, size_t size);
+char* shsl_sb_get(shsl_string_builder* sb);
+
+char* shsl_cat_strs_n(size_t n, ...);
+char* shsl_append_chars_n(const char* s, size_t n, ...);
+// concatenate a bunch of strings
+#define shsl_cat_strs(...)                                      \
+    shsl_str_cat_n(SHSL_ARG_COUNT(__VA_ARGS__), __VA_ARGS__)
+// append a bunch characters at the end of a string
+#define shsl_append_chars(first, ...)                                      \
+    shsl_append_chars_n(first, SHSL_ARG_COUNT(__VA_ARGS__), __VA_ARGS__)
+bool is_escape_char(const char c);
+bool does_char_escape(const char c);
+char escape_to_escaped(const char c);
+
+//// SHSL DATA DECLARATIONS
 //// ----------------------------------------------------------------------------
 
 /// DATA TYPES DECLARATIONS
@@ -471,15 +538,7 @@ shsl_ref shsl_make_initial_env(void);
 //// PRINT DEBUGGING DECLARATIONS
 //// ----------------------------------------------------------------------------
 /// SERIALIZATION DECLARATIONS
-defstruct(shsl_string_builder);
-void shsl_sb_push(shsl_string_builder* sb, const char c);
-void shsl_sb_push_nullt_str(shsl_string_builder* sb, const char* c);
-void shsl_sb_push_sized_str(shsl_string_builder* sb, const char* c, size_t size);
-
-// a lot of logic between pretty and serialized is shared and it's a bit tedious
-// to have to repeat it all save for those two differences
 void shsl_sb_push_obj(shsl_string_builder* sb, shsl_ref obj, bool pretty);
-char* shsl_sb_get(shsl_string_builder* sb);
 char* shsl_to_string(shsl_ref ref);
 
 /// PRINTING DECLARATIONS
@@ -506,7 +565,136 @@ int shsl_main(int argc, char** argv);
 #endif // SHSL_H
 
 #ifdef SHSL_IMPLEMENTATION
-//// DATA DEFINITIONS
+//// DUMB UTILITIES DECLARATIONS
+//// ----------------------------------------------------------------------------
+
+/// CHARACTER AND STRING HANDLING DECLARATIONS
+typedef struct shsl_string_builder {
+    char* buf;
+    size_t size;
+    size_t capacity;
+} shsl_string_builder;
+
+void shsl_sb_push(shsl_string_builder* sb, const char c) {
+    if(sb->size == sb->capacity) {
+        size_t new_capacity = sb->capacity+(sb->capacity/2)+1;
+        sb->buf = (char*)realloc(sb->buf, new_capacity);
+        sb->capacity = new_capacity;
+    }
+    sb->buf[sb->size]=c;
+    sb->size++;
+}
+void shsl_sb_push_nullt_str(shsl_string_builder* sb, const char* c) {
+    while(*c) shsl_sb_push(sb, *(c++));
+}
+void shsl_sb_push_sized_str(shsl_string_builder* sb, const char* c, size_t size) {
+    for(size_t i = 0; i<size; ++i) shsl_sb_push(sb, c[i]);
+}
+
+// https://en.wikipedia.org/wiki/Escape_sequences_in_C
+
+// does this character have to be escaped in strings?
+bool is_escape_char(const char c) {
+    return (c == '\a')
+        || (c == '\b')
+        // || (c == '\e') // (not ansi, -Wpedantic doesn't like it)
+        || (c == '\f')
+        || (c == '\n')
+        || (c == '\r')
+        || (c == '\t')
+        || (c == '\v')
+        || (c == '\\')
+        || (c == '\"')
+        || (c == '\?')
+        || (c == '\0');
+    // TODO: I'll get to unicode when I get to it
+}
+// given a character c, is \c a recognized escape sequence?
+bool does_char_escape(const char c) {
+    return (c == 'a')
+        || (c == 'b')
+        || (c == 'f')
+        || (c == 'n')
+        || (c == 'r')
+        || (c == 't')
+        || (c == 'v')
+        || (c == '\\')
+        || (c == '"')
+        || (c == '?')
+        || (c == '0');
+}
+// take character acting as "payload" in escape sequence
+// (ie: the 'n' in '\n')
+// and return the character it's escaping
+char escape_to_escaped(const char c) {
+    switch(c) {
+    case 'a': return '\a';
+    case 'b': return '\b';
+    case 'f': return '\f';
+    case 'n': return '\n';
+    case 'r': return '\r';
+    case 't': return '\t';
+    case 'v': return '\v';
+    case '\\': return '\\';
+    case '"': return '\"';
+    case '?': return '\?';
+    case '0': return '\0';
+    default: assert(0 && "unreachable");
+    }
+}
+// take character and return representation of that
+// character as when dumping to string
+const char* to_string_representation(const char c) {
+    static char b[2];
+    switch(c) {
+    case '\a': return "\\a";
+    case '\b': return "\\b";
+    case '\f': return "\\f";
+    case '\n': return "\\n";
+    case '\r': return "\\r";
+    case '\t': return "\\t";
+    case '\v': return "\\v";
+    case '\\': return "\\\\";
+    case '\"': return "\\\"";
+    case '\?': return "\\?";
+    case '\0': return "\\0";
+    default:
+        b[0]=c;
+        b[1]='\0';
+        return b;
+    }
+}
+
+char* shsl_cat_strs_n(size_t n, ...) {
+    va_list args;
+    va_start(args, n);
+    shsl_string_builder sb = {0};
+    for(size_t i = 0; i<n; ++i) {
+        char* c = va_arg(args, char*);
+        shsl_sb_push_nullt_str(&sb, c);
+    }
+    va_end(args);
+    shsl_sb_push(&sb, '\0');
+    return shsl_sb_get(&sb);
+}
+
+// https://stackoverflow.com/questions/23983471
+// 'Char' is promoted to 'int' when passed through in C
+char* shsl_append_chars_n(const char* s, size_t n, ...) {
+    va_list args;
+    va_start(args, n);
+    shsl_string_builder sb = {0};
+    shsl_sb_push_nullt_str(&sb, s);
+    for(size_t i = 0; i<n; ++i) {
+        char c = va_arg(args, int); // must be passed as int because C is stupid
+        shsl_sb_push(&sb, c);
+    }
+    va_end(args);
+    shsl_sb_push(&sb, '\0');
+    return shsl_sb_get(&sb);
+}
+
+//// SHSL DATA DEFINITIONS
 //// ----------------------------------------------------------------------------
 
 /// DATA TYPES DEFINITIONS
@@ -798,6 +986,19 @@ shsl_ref shsl_mksym(const char* name) {
 		       .type = SHSL_SYM,
 		       .sym = (shsl_sym){
 			   .name = shsl_ref_add(shsl_mkstr(name)),
+		       });
+}
+// the nocopy versions are for when you have the name allocated on the heap
+// no one else is gonna touch it
+// might as well take it
+shsl_ref shsl_mkstr_nocopy(char* str) {
+    return_mallocd_obj(.ref_count = 0, .type = SHSL_STR, .str = str);
+}
+shsl_ref shsl_mksym_nocopy(char* name) {
+    return_mallocd_obj(.ref_count = 0,
+		       .type = SHSL_SYM,
+		       .sym = (shsl_sym){
+			   .name = shsl_ref_add(shsl_mkstr_nocopy(name)),
 		       });
 }
 
@@ -1512,14 +1713,10 @@ shsl_token parse_non_special_token(char*c, size_t len) {
 	    .ref = shsl_ref_to_nil(),
 	};
 	
-    char* newstr = slice_to_fresh_str(c, len);
     shsl_token t =  (shsl_token) {
 	.type = SHSL_TOK_SYMBOL,
-	.ref = shsl_mksym(newstr),
+	.ref = shsl_mksym_nocopy(slice_to_fresh_str(c, len)),
     };
-    // shsl_mksym already copies the string we pass to it
-    // so we don't need this one after the symbol is made
-    free(newstr);
     return t;
 }
 
@@ -1582,30 +1779,58 @@ lexer_pair token_off(char* str) {
 	return (lexer_pair){ .token = empty_token(SHSL_TOK_COMMA),
 			     .remaining = str+1, };
 
-        // string literals
-        // TODO: we currently don't handle escape sequences
     case '"': {
-        char* c = str+1;
-        while (*c!='\0' && *c!='"') c++;
-        // handle unterminated string literal
-        if(*c=='\0') {
+        shsl_string_builder sb = {0};
+        char* iter = str+1;
+        while(*iter != '\0' && *iter != '"') {
+            if(*iter == '\\') {
+                char escape = *(iter+1);
+                if(escape == '\0') {
+                    if(sb.size != 0) free(sb.buf);
+                    return error_lexer_pair
+                        ("why did try and use the null terminator "
+                         "in an escape sequence? how do you even do that?");
+                }
+                if(!does_char_escape(escape)) {
+                    if(sb.size != 0) free(sb.buf);
+                    return error_lexer_pair
+                        (shsl_append_chars("unrecognized escape sequence: \\",
+                                           escape, '!'));
+                }
+                shsl_sb_push(&sb, escape_to_escaped(escape));
+                iter+=2;
+            }
+            else {
+                shsl_sb_push(&sb, *iter);
+                iter++;
+            }
+        }
+        if(iter == str+1) {
+            // that is, if we didn't advance for shit
+            return (lexer_pair) {
+                .token = (shsl_token) {
+                    .type = SHSL_TOK_STRING,
+                    .ref = shsl_mkstr(""),
+                },
+                .remaining = iter+1, // skip final delimiting '"'
+            };
+        }
+        else if(*iter=='\0') {
+            // unterminated string literal
+            if(sb.size != 0) free(sb.buf);
             return error_lexer_pair("unterminated string literal!");
         }
         else {
-            size_t len = (c-str);
-            // remove beginning and ending '"' and add null terminator
-            char* s = (char*)calloc(len, sizeof(char));
-            memcpy(s, str+1, len);
-            s[len-1] = '\0';
-            lexer_pair lp = (lexer_pair) {
+            // string closed correctly
+            assert(*iter == '"');
+            shsl_sb_push(&sb, '\0');
+            return (lexer_pair) {
                 .token = (shsl_token) {
                     .type = SHSL_TOK_STRING,
-                    .ref = shsl_mkstr(s),
+                    .ref = shsl_mkstr_nocopy(shsl_sb_get(&sb)),
                 },
-                .remaining = c+1, // skip final delimiting '"'
+                .remaining = iter+1, // skip final delimiting '"'
             };
-            free(s);
-            return lp;
         }
     }
     }
@@ -3283,10 +3508,16 @@ shsl_defun(shsl_builtin_nthcdr, "nthcdr", args, env, {
         return shsl_nthcdr(shsl_fn_arg(0), shsl_int(shsl_fn_arg(1)));
     })
 
-/// BUILTIN STRING FUNCTION DEFINITIONS
+/// BUILTIN STRING FUNCTIONS DEFINITIONS
 shsl_defun(shsl_builtin_str, "str", args, env, {
         (void)env;
-        return shsl_mkerr(shsl_ref_to_nil(), "TODO");
+        shsl_string_builder sb = {0};
+        shsl_vec_foreach(i, arg, args)
+            shsl_sb_push_obj(&sb, arg, true);
+
+        if(sb.size == 0)
+            shsl_mkstr("");
+        return shsl_mkstr_nocopy(shsl_sb_get(&sb));
     })
 
 /// BUILTIN VECTOR FUNCTIONS DEFINITIONS
@@ -3696,6 +3927,10 @@ shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
     shsl_env_def(env, shsl_mksym("map-set!"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_mapset));
 
+    // string operations(?)
+    shsl_env_def(env, shsl_mksym("str"),
+                 shsl_mkbuiltin_fn(env, shsl_builtin_str));
+
     // collection operations
     shsl_env_def(env, shsl_mksym("get"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_get));
@@ -3748,43 +3983,6 @@ shsl_ref shsl_env_make_initial(void) {
 //// PRINT DEBUGGING DEFINITIONS
 //// ----------------------------------------------------------------------------
 /// SERIALIZATION DEFINITIONS
-typedef struct shsl_string_builder {
-    char* buf;
-    size_t size;
-    size_t capacity;
-} shsl_string_builder;
-
-void shsl_sb_push(shsl_string_builder* sb, const char c) {
-    if(sb->size == sb->capacity) {
-        size_t new_capacity = sb->capacity+(sb->capacity/2)+1;
-        sb->buf = (char*)realloc(sb->buf, new_capacity);
-        sb->capacity = new_capacity;
-    }
-    sb->buf[sb->size]=c;
-    sb->size++;
-}
-void shsl_sb_push_nullt_str(shsl_string_builder* sb, const char* c) {
-    while(*c) shsl_sb_push(sb, *(c++));
-}
-void shsl_sb_push_sized_str(shsl_string_builder* sb, const char* c, size_t size) {
-    for(size_t i = 0; i<size; ++i) shsl_sb_push(sb, c[i]);
-}
-// https://en.wikipedia.org/wiki/Escape_sequences_in_C
-bool is_char_escaped(const char c) {
-    return (c == '\a')
-        || (c == '\b')
-        // || (c == '\e') // (not ansi, -Wpedantic doesn't like it)
-        || (c == '\f')
-        || (c == '\n')
-        || (c == '\r')
-        || (c == '\t')
-        || (c == '\v')
-        || (c == '\\')
-        || (c == '\"')
-        || (c == '\?');
-    // TODO: I'll get to unicode when I get to it
-}
-
 #define SHSL_MAX_ATOM_SERIALIZATION_LENGTH 256
 void shsl_sb_push_obj(shsl_string_builder* sb, shsl_ref obj, bool pretty) {
     // only difference between pretty printing and dumping is putting the
@@ -3805,12 +4003,23 @@ void shsl_sb_push_obj(shsl_string_builder* sb, shsl_ref obj, bool pretty) {
         shsl_sb_push_sized_str(sb, buf, written);
         break;
     case SHSL_STR:
-        if(pretty) shsl_sb_push(sb, '"');
-        for(const char* c = obj.ptr->str; *c; c++) {
-            if(is_char_escaped(*c)) shsl_sb_push(sb, '\\');
-            shsl_sb_push(sb, *c);
+        if(!pretty) {
+            // dump to be read by reader
+            // handle all escapes and display them as printable ascii
+            shsl_sb_push(sb, '"');
+            for(const char* c = obj.ptr->str; *c; c++) {
+                if(is_escape_char(*c))
+                    shsl_sb_push_nullt_str(sb, to_string_representation(*c));
+                else
+                    shsl_sb_push(sb, *c);
+            }
+            shsl_sb_push(sb, '"');
         }
-        if(pretty) shsl_sb_push(sb, '"');
+        else {
+            // I'm a pretty princess
+            // and displaying escape sequences is not pretty
+            shsl_sb_push_nullt_str(sb, obj.ptr->str);
+        }
         break;
     case SHSL_SYM:
         shsl_sb_push_nullt_str(sb, obj.ptr->sym.name.ptr->str);
@@ -3860,7 +4069,7 @@ void shsl_sb_push_obj(shsl_string_builder* sb, shsl_ref obj, bool pretty) {
             shsl_sb_push_obj(sb, obj.ptr->map.buf[i].k, false);
             shsl_sb_push(sb,' ');
             shsl_sb_push_obj(sb, obj.ptr->map.buf[i].v, false);
-            if(i != obj.ptr->map.size)
+            if(i != (obj.ptr->map.size-1))
                 shsl_sb_push(sb,' ');
         }
         shsl_sb_push(sb,'}');
