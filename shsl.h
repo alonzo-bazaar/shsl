@@ -194,6 +194,7 @@ void shsl_vec_set(shsl_ref vec_obj, size_t i, shsl_ref new_val);
 size_t shsl_vec_length(shsl_ref vec_obj);
 // bit of shit, but this avoids polluting the body with extra symbols
 // although it does introduce a bit of overhead, sorry :|
+// (it should be easy enough for the compiler to remove the extra overhead)
 // it's here and not in the implementation as this is part of shsl's api
 #define shsl_vec_foreach(i, elt, vec)			\
     for(size_t i = 0; i<shsl_vec_length(vec); ++i)	\
@@ -210,6 +211,9 @@ void shsl_map_set(shsl_ref map_obj,
 
 /// COLLECTION BUILDERS DECLARATIONS
 typedef enum SHSL_CB_TYPE {SHSL_CB_LIST, SHSL_CB_VEC, SHSL_CB_MAP} SHSL_CB_TYPE;
+defstruct(shsl_cons_builder);
+defstruct(shsl_vec_builder);
+defstruct(shsl_map_builder);
 defstruct(shsl_cb);
 shsl_cb shsl_cb_make(SHSL_CB_TYPE type);
 void shsl_cb_add(shsl_cb* cb, shsl_ref obj);
@@ -388,6 +392,8 @@ void shsl_expr_free(shsl_expr* expr);
 
 // create enviroment frame (map) binding given syms to given vals
 shsl_ref shsl_env_mkframe(shsl_ref syms, shsl_ref vals);
+// create enviroment frame (map) binding given lambda list and values
+shsl_ref shsl_ll_env_mkframe(shsl_lambda_list* syms, shsl_ref vals);
 // find kv pair in environment correspinding to key, or NULL if no such pair exists
 shsl_kv* shsl_env_find_kv(shsl_ref env, shsl_ref key);
 shsl_ref shsl_env_lookup(shsl_ref env, shsl_ref key);
@@ -471,7 +477,21 @@ void shsl_fprint(const shsl_ref obj, FILE* stream);
 
 //// USER FACING FUNCTIONS DECLARATIONS
 //// ----------------------------------------------------------------------------
+
+/// SHSL SUBROUTINES FOR MAIN DECLARATIONS
+// (they are, of course, also useable standalone and are often "pure" enough
+//  that it makes sense to use em as such)
 shsl_ref shsl_eval_str(char* c, shsl_ref env);
+char* shsl_read_file(const char *path);
+void shsl_eval_file(const char* filepath, shsl_ref env);
+void shsl_repl(shsl_ref env);
+
+/// SHSL MAIN DECLARATIONS
+void shsl_usage(const char* name, bool print_extra, FILE* stream);
+void shsl_die(int exit_with, const char* errmsg, ...);
+int shsl_main(int argc, char** argv);
+
+#endif // SHSL_H
 
 #ifdef SHSL_IMPLEMENTATION
 //// DATA DEFINITIONS
@@ -2656,7 +2676,9 @@ shsl_expr* shsl_expr_copy(shsl_expr* orig) {
 }
 
 /// EVALUATION FUNCTIONS DEFINITIONS
-// TODO: it
+// this function is to be called by c code that is sure syms and vals have the
+// same length, it is guaranteed to return a valid env frame
+// well, that or it shits itself and dies because it cannot return one
 shsl_ref shsl_env_mkframe(shsl_ref syms, shsl_ref vals) {
     assert(syms.ptr->type == SHSL_VEC);
     assert(vals.ptr->type == SHSL_VEC);
@@ -2668,6 +2690,22 @@ shsl_ref shsl_env_mkframe(shsl_ref syms, shsl_ref vals) {
 	shsl_map_set(frame, sym, val);
     }
     return frame;
+}
+// this function is instead called by shsl code during function calls,
+// it doesn't crash if it cannot return a valid env frame, it instead
+// returns an error 
+// callers of this function should make sure the value they get is a valid env 
+// frame, or they're gonna get some weird fucking bugs when looking for symbols
+// in error objects
+shsl_ref shsl_ll_env_mkframe(shsl_lambda_list* syms, shsl_ref vals) {
+    // TODO: only supports positional arguments so far
+    if(shsl_vec_length(syms->positional) != shsl_vec_length(vals))
+	return shsl_mkerr
+	    (vals,
+	     "expected exactly %zu positional arguments but %zu were provided",
+	     shsl_vec_length(syms->positional), shsl_vec_length(vals));
+
+    return shsl_env_mkframe(syms->positional, vals);
 }
 shsl_kv* shsl_env_find_kv(shsl_ref env, shsl_ref key) {
     assert(shsl_type(key) == SHSL_SYM);
@@ -2807,13 +2845,22 @@ shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
             if(len == 0)
                 return shsl_ref_to_nil();
 
-            shsl_ref inner_env =
-                shsl_mkcons
-                (shsl_env_mkframe(fn.ptr->user_fn.lambda_list->positional, args),
-                 fn.ptr->user_fn.env);
+	    shsl_ref inner_frame = shsl_ll_env_mkframe
+		(fn.ptr->user_fn.lambda_list, args);
+	    if(shsl_is_err(inner_frame)) {
+		shsl_ref res = shsl_mkerr
+		    (inner_frame,
+		     "could not correctly bind arguments in function call!");
+		shsl_ref_del(fn);
+		shsl_ref_del(args);
+		return res;
+	    }
+
+	    shsl_ref inner_env =
+		shsl_mkcons (inner_frame, fn.ptr->user_fn.env);
 
 	    shsl_ref_add(inner_env);
-            shsl_ref res = shsl_eval_sequence(fn.ptr->user_fn.body,
+	    shsl_ref res = shsl_eval_sequence(fn.ptr->user_fn.body,
 					      fn.ptr->user_fn.body_length,
 					      inner_env);
 	    res.ptr->ref_count++;
@@ -3717,6 +3764,8 @@ void shsl_fprint(const shsl_ref ref, FILE* stream) {
 
 //// USER FACING FUNCTIONS DEFINITIONS
 //// ----------------------------------------------------------------------------
+
+/// SHSL SUBROUTINES FOR MAIN DECLARATIONS
 shsl_ref shsl_eval_str(char* c, shsl_ref env) {
     shsl_ref curr = shsl_ref_to_nil();
     while(true) {
@@ -3819,10 +3868,8 @@ void shsl_repl(shsl_ref env) {
     else
 	printf("\nbye bye :)\n");
 }
-#endif // SHSL_IMPLEMENTATION
 
-#ifdef SHSL_MAIN
-
+/// SHSL MAIN DEFINTIONS
 void shsl_usage(const char* name, bool print_extra, FILE* stream) {
     static char* msg =
 	"usage\n"
@@ -3851,7 +3898,6 @@ void shsl_usage(const char* name, bool print_extra, FILE* stream) {
     if(print_extra)
 	fprintf(stream, extra, name);
 }
-
 void shsl_die(int exit_with, const char* errmsg, ...) {
     va_list args;
     va_start(args, errmsg);
@@ -3860,8 +3906,7 @@ void shsl_die(int exit_with, const char* errmsg, ...) {
     va_end(args);
     exit(exit_with);
 }
-
-int main(int argc, char** argv) {
+int shsl_main(int argc, char** argv) {
     // init
     shsl_ref env = shsl_make_initial_env();
     shsl_env_def(env, shsl_mksym("progname"), shsl_mkstr(argv[0]));
@@ -3925,6 +3970,5 @@ int main(int argc, char** argv) {
     shsl_ref_del(env);
     return 0;
 }
-#endif // SHSL_MAIN
 
-#endif // SHSL_H
+#endif // SHSL_IMPLEMENTATION

@@ -1,3 +1,204 @@
+* first orders of business
+- [ ] make build.shsl
+- [ ] make build.shsl for exec library
+- [ ] fininsh exec library (with tests) and add it to shsl
+- [ ] make generic ds library (with tests and a build.shsl)
+- [ ] add it to shsl (vector, map, string builder)
+- [ ] object string serializer
+- [ ] port test.sh to test.shsl
+- [ ] eval reference count data contract (with leak tests, best done after porting test.sh to test.shsl)
+- [ ] macros
+- [ ] kwargs
+- [ ] desmurfing macros with opt-out (_NOSTRIP)
+
+* data structures
+create a generic data structure library (loosely based on stb_ds)
+containing
+generic resizeable vectors
+generic hash maps
+and functions to manipulate em
+and ways to iterate them
+
+** Hash maps (for env&Co.)
+- [ ] make the hash map use an actual hash function
+- [ ] open hash collision detection
+- [ ] rehashing for resizing
+- [ ] test the damn thing
+- [ ] add a map foreach macro
+
+** Vectors
+- [ ] add a generic vector type
+- [ ] make foreach&Co. properties of the vector
+- [ ] use it to create string builder (for windows execution)
+
+** Serialization
+- [ ] (after adding string builder) add obj to str functions
+- [ ] expose those functions to shsl code
+
+** Shsl
+expose the following functions to shsl code
+ds funs
+- [ ] vec-push
+- [ ] vec-push!
+- [ ] vec-cat
+- [ ] vec-cat!
+- [ ] str-cat
+- [ ] str-cat!
+
+equality and atomicity
+- [ ] atom? (is of atomic type)
+- [ ] atom-eq? (equality between two atoms)
+- [ ] eq? (generic equality)
+- [ ] = (synonim for eq?)
+
+* Systemy shit
+** exec
+- [ ] exec      // single command
+- [ ] exec-pipe // pipeline
+- [ ] exec-many // parallel
+
+how do I return the execution status?
+ideas:
+- t or error
+- t or error string
+
+** fs
+- [ ] file?
+- [ ] dir?
+- [ ] file-make
+- [ ] dir-make
+- [ ] dir-list
+- [ ] file-del
+- [ ] dir-del :if-empty :recursive
+- [ ] file-rn (accepts 2 strings) (should I call it file-rename instead?)
+- [ ] file-mv (accepts 2 strings) (should I call it file-move instead?)
+
+note: file renaming and moving file in a directory are two different operations under this api (by design)
+further note: all these functions only take the arguments to do their job exactly once
+unline the unix shell equivalents that kinda go willy nilly
+
+this is also by design
+shsl control flow should be better at looping over files than making these functions variadic a-la cazzo
+you could make them variadic by adding
+- [ ] file-make-many
+- [ ] dir-make-many
+- [ ] file-del-many
+- [ ] dir-del-many
+- [ ] file-mv-many (either have a keyword arg for the destination or find some other way to make the destination clearly distinct that is not just positional convention)
+
+note there is no file-rn-many
+because how the fuck would one even do that?
+
+* errors
+make error logging runtime thing?
+global boolean on the C side
+exposed to shsl through the following functions
+
+with-err-no-log
+with-err-log
+set-err-log!
+unset-err-log!
+err-log?
+
+* Generic
+change the convention for how shit gets returned from eval
+user facing functions should return an object already with a reference and then the user drops the reference when they're done with it
+rename shsl_ref_del to shsl_ref_drop to make it clearer on the user side
+
+this also means that internally shsl_eval is responsible for dropping the temporary results of intermediate evaluations
+
+define optional autodrop utility macro for the c code based on amanda's autofree
+__attribute(cleanup(...))
+
+add fucking macros
+(which entails)
+add fucking gensym
+(which probably entails)
+symbol interning?
+
+add fucking keyword arguments
+add fucking optioanl arguments
+
+move tests from bash script to shsl script, this should allow us to
+1. have less fork exec during the execution of the script
+2. be able to check for leaks in all pieces of ~test.sh~ simultaneously
+
+Start actually using shsl for some build scripts and the like, this should allow you to better understand what defets does the language have as far as useability&Co. are concerned
+Start becoming an shsl user as well as an shsl developer, this should hopefully make Don Knuth proud
+I love you Don Knuth <3
+
+possible scripts to use shsl for
+- desmurf.shsl (present shsl.h through a more useable useable api, you can have some codegen configs therein for extra fuckery)
+- build.shsl
+- test.shsl
+  (porting current test.sh to test.shsl requires first porting print logic to string builder logic, which should be done as part of the generic ds library to include with shsl)
+  accidental topological sorting on that one, lo and behold!
+
+- you could also port shsl as the build system for the exec thing
+- and you work on exec as you work on shsl as you work on exec
+
+- well, a more ... way to do it would be to close the exec repo, move all the exec shit into the shsl repo (perhaps under a libs directory?, or better yet under a wip directory)
+  once moved there you already have linux exec, and you're on linux
+  you can use shsl as the build system for the exec library, as a way to test it out
+
+  that said, exec (and, in the near future, ds and fs) all sound like libraries which would be rather useful in isolation, even for future projects
+  I'd say a better way to work on em would be to initially develop them (with an shsl build script) on their own, and once they're in an an "assimilable" state either archive em or just, abandom em I guess 
+
+first order of business should be trying to use shsl more to figure out what's the best direction in which to act as far as its evolution is concerned
+the exec data contract thing is mostly a tangent and more of a cleanup
+it doesn't make anything work more or less than what it does now, it just makes the data contract between the evaluator and itself/user code less ugly
+
+tho please note if we wish to use shsl as a build script and test its capibilites on windows as well as unix I should also find a way to install cl.exe or msvcup or whatnot
+
+a generic ds library is very needed I'd say, both for the hash maps and for the serialization through string builders
+
+we'll start porting exec once the windows bits work and I have a clear internal api for the windows shit
+after which we gotta still make sure the api is testable from the c side as well
+we'll need plenty tests for that thing
+
+I'd say we can currently ignore the batbadbut vulnerability and leave it as a todo for when this entire thing is more mature, I'd say at the moment it's far, far more of a tangent than anything useful
+keep the bat test tho
+
+* Documentation
+- [ ] finish the learnxinyminutes style rundown
+
+* System values
+add the following system values
+- [ ] linux?, unix?, mac?, win32? :: all symbols evaluating to wether you're on the platform in question
+- [ ] alternatively (and/or in parallel) you could have a uname variable
+- [ ] hostlang, either "C" or "C++", depending on wether __cplusplus is defined
+
+* FFI
+see docs for libffi
+we'll probably have to add a ccall special form
+
+should we add an shsl_call function to call shsl functions from c code?
+might wanna do a map macro on the arguments with a manually wrangled generic function for the various arguments so they're all properly marshalled to the corresponding shsl value
+the function should have implementations for all C primitives 
+using _Generic
+
+after which we should probably add a whole bunch of C code to tell the various shsl types apart
+and to read values off of a shsl object
+
+* String literals
+we still gotta handle escape sequences brudda
+
+* reader macros?
+(migth be getting into positively too much terrritory)
+you know that cute lil shorthand clojure has for functions like %(+ %1 %2)?
+that
+I want that
+
+it's probably gonna be a mild pain in the ass but
+either in the lexer or in the reader
+- tell either % or %( apart
+- once you see it, make sure the shit after it is a function body
+- deep walk that shit looking for symbols starting in % and having a number after
+- get the max
+- create a function with that many arguments all called %1 %2 %3 ...
+- that
+
+* Done shit
 - [X] vec expression
 - [X] map expression
 - [X] object copy
@@ -10,25 +211,20 @@
   - [X] lambda list
 - [X] user functions (expression/parsing)
 
-- [ ] it (even if I'm using it as a hack to avoid unreachable shit)
+- [-] it (even if I'm using it as a hack to avoid unreachable shit)
+  current status: WONTFIX
   should be easier to troubleshoot why it didn't work before now that I have -r
 
-- [ ] builtin functions
-- [ ] predicates (isnil, iscons, islist, iserr, isvec, ismap, et al.)
-- [ ] get
-- [ ] set
+- [X] builtin functions
+- [X] predicates (isnil, iscons, islist, iserr, isvec, ismap, et al.)
+- [X] get
+- [X] set
 
 - [X] def
 - [X] set
-- [ ] let
+- [X] let
 
-- [ ] finish the shsl_expr_copy, shsl_expr_free, &Co. functions
+- [X] finish the shsl_expr_copy, shsl_expr_free, &Co. functions
   (remove the ~assert(0 && "TODO")~ bits and replace them with actual code)
 
-* Hash maps (for env&Co.)
-- [ ] make the hash map use an actual hash function
-- [ ] open hash collision detection
-- [ ] rehashing for resizing
-- [ ] test the damn thing
-- [ ] add a map foreach macro
 

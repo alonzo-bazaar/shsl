@@ -1,8 +1,20 @@
 #include<stdio.h>
 #include<assert.h>
 
+// test multiple inclusion of shsl as well
+#include"shsl.h"
+#include"shsl.h"
+#include"shsl.h"
+#include"shsl.h"
 #define SHSL_IMPLEMENTATION
 #include"shsl.h"
+
+// this file tests shsl through the its C api
+// it is not necessairly limited, as shsl's C api is... all of shsl
+// like, the whole thing's C
+// but it gets tedious after a while, so a lot of other tests have been
+// written in either shell scripts or shsl itself to test it through a less
+// pain-in-the-ass api
 
 // test utilities:
 #ifdef SHSL_LOG_TESTS

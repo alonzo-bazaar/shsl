@@ -1,3 +1,6 @@
 #define SHSL_IMPLEMENTATION
-#define SHSL_MAIN
 #include "shsl.h"
+
+int main(int argc, char** argv) {
+    return shsl_main(argc, argv);
+}

@@ -1,5 +1,6 @@
-* SHL
+* SHSL
 Single Header Scripting (language|library|layer|lisp)
+
 SHSL is a small scripting language with a [[https://clojure.org/][clojure]]-like syntax meant to be as easy as possible to add to an existing C or C++ project.
 
 #+begin_quote
@@ -12,35 +13,41 @@ Many C/C++ projects end up requiring some form or another of scripts to support 
 Consider for instance the problem of adding a build script/build step to your C/C++ project, current approaches may be
 - A shell script (~build.sh~) :: but that's hardly portable.
 - Makefile :: but it's quite difficult to make a cross platform makefile, plus makefiles can get rather esoteric rarther quickly.
+- A python script :: but that incurs in this huge build time dependency for the project that is "you must have python installed", and may end up requiring a particular range of python versions, adding further complications.
 - Cmake :: which is a more common choice for larger project but can be a huge upfront dependency for smaller projects, plus it introduces a lot of moving parts that can often get in the way, a whole new set of concepts you need to learn, and is often just plain overkill.
 
 SHSL aims to serve the niche of C/C++ projects that are large enough to need a script for something, but small enough that other cross platform solutions for scripting would be an overkill dependency.
 
-Being a singe C header SHSL is quite easy to vendor with your project, to run any script in your project you just need to compile one C file and there's your runner, and being a header file you can also include it in your C files and run the scripts from wihtin C code!
+Being a singe C header SHSL is quite easy to vendor with your project, to run any script in your project you just need to compile one C file and there's your runner, and being a header file you can also include it in your C files and run the scripts from within the C code!
 
 * Compiling
 #+begin_quote
 *NOTE:* SHSL Has been tested with ~clang~ and ~gcc~ on Linux, the code is meant to be compiler and OS agnostic but I haven't tested it on other compilers or operating systems to verify this.
 #+end_quote
 
+** As a Library
+SHSL is an stb sytle library, this means function declarations and definitions live in the same file, with function definitions placed behind a macro so you can decide where to define them, and only define them there, thus avoiding odr violations, while still not having the entire library be only one file.
+
+To compile shsl as a dynamic library you can do
+#+begin_src bash
+  cc -x c -shared -fPIC -DSHSL_IMPLEMENTATION -o shsl.so shsl.h
+#+end_src
+#+begin_quote
+*NOTE:* The ~-x c~ in here is to tell the compiler to treat ~shsl.h~ as a ~.c~ instead of an ~.h~ file, as compiling an ~.h~ file whilst treating it as such will result in the creation of a precompiled header, if that's what you want remove the ~-x c~
+#+end_quote
+
+** As an Executable
 If you have downloaded this entire repository you can just compile SHSL with
 #+begin_src bash
   make shsl
 #+end_src
 Which will create a ~shsl~ executable in the project root.
 
-If you wanna include SHSL in your project as just an ~.h~ file you can compile SHSL by calling
-#+begin_src bash
-  cc -DSHSL_IMPLEMENTATION -DSHSL_MAIN -x c -o shsl shsl.h
-#+end_src
-
-If that's too many flags ~shsl.c~ is provided as a convenience file, if you include ~shsl.c~ and ~shsl.h~ in the same somewhere in your project you can compile SHSL to an executable by instead calling
-
+Being only one ~.h~ and once ~.c~ file, SHSL can also be compiled as
 #+begin_src bash
   cc -o shsl shsl.c
 #+end_src
-
-If you have more complex project structure in which you want to include SHSL, it's just a an h file and maybe a c file, you can add them to your project as you would any other c and h file, that's the beauty of it.
+If you have more complex project structure in which you want to include SHSL, the whole library is just an ~.h~ file, you can add it to your project as you would any other ~.h~ file, that's the beauty of it.
 
 ** Compiling/running the tests
 To compile and run the C tests you run
@@ -52,6 +59,7 @@ There are also some tests written in bash which you can run by calling
 #+begin_src bash
   ./test.sh
 #+end_src
+
 * Usage
 Assuming you're in the project root and that the SHSL executable is called ~./shsl~
 
@@ -165,24 +173,36 @@ The following is a [[https://learnxinyminutes.com/][learnxinyminutes]] style run
 
 * Repo structure
 - ~shsl.h~ :: the master file, the entire langauge is defined in here
-- ~shsl.c~ :: convenience file for compilation
+- ~shsl.c~ :: thin main function
 - ~Makefile~ :: Makefile
+- ~mods/~ :: extra modules for shsl where all the various system functions are defined
 - ~examples/~ :: various examples of shsl scripts, all the scripts in this directory can be run with the current shsl version
 - ~ramblings/~ :: various notes to self I felt the need to version
 - ~docs/~ :: (currently absent) documentation
 
-* Roadmap
+* TODO's and the like
 - [X] get language to a usable state
 - [ ] fix leaks when lexer or parser return an error
 - [X] tests
 - [ ] but like, a looooot of tests
-- [ ] documentation
+- [ ] better documentation
 - [ ] CFFI through a ctypes like library
-- [ ] an ~exec~ function for scripting
+  - may incur in a dependency on libffi, put behind a macro to allow for shsl to be compiled without the dependancy as well
+- [-] ~exec~ functions for scripting
+  - [X] ~exec~ function for posix and win32
+  - [-] ~exec-parallel~ functions for posix and win32
+  - [-] ~exec-pipeline~ functions for posix and win32
+  - [-] ~exec-str~ functions for posix and win32
 - [ ] an ~execasync~ function for scripting
+- [ ] a filesystem library for scripting
 - [ ] proper hash maps instead of using a sequential vector of key/value pairs
-- [ ] support for more memory management schemas (implement mark and sweep and have an interface that can accomodate mark and sweep)
+- [ ] make closer to clojure for ease of learning
+- [ ] support for more memory management schemas
+  - [ ] implement mark and sweep and have an interface that can accomodate mark and sweep
+  - [ ] (optionally) integrate ~libgc~ and have an interface that can accomodate taht as well (behind a preprocessor flag as it would otherwise incur in a mandatory dependency)
 - [ ] support for lisp macros
-- [ ] test on windows (through wine)
+- [ ] test on windows (will likely be done through mingw and wine)
+- [ ] keyword arguments
+- [ ] variadics
 
 * Similar projects
