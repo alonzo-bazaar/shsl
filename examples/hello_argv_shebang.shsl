@@ -1,5 +1,6 @@
 #!./shsl
-;; -*- mode:clojurescript -*-
+;; -*- mode:clojure -*-
+;; vi: set ft=clojure;
 (println (vec-len argv))
 (if (== (vec-len argv) 0)
   (println "hello, nameless one")

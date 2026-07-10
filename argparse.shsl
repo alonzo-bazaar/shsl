@@ -1,4 +1,6 @@
+#!./shsl
 ;; -*- mode:clojurescript -*-
+;; vi: set ft=clojure:
 (def sequential?
   (fn [coll]
     (or (list? coll) (str? coll) (vec? coll))))

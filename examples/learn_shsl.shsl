@@ -1,9 +1,10 @@
-#!/usr/bin/env cljs
-;; -*-mode:clojurescript-*-
+#!/usr/bin/env clj
+;; -*- mode:clojure -*-
+;; vi: set ft=clojure;
 ;; the comment above is just a "magic comment" to tell emacs to treat this as a
-;; clojurescript file so it properly highlights code
+;; clojure file so it properly highlights code
 ;; the contents of the shebang don't matter, it's meant to be read by the os
-;; not by shsl, shsl just has to recognize it and skip ignore it
+;; not by shsl, shsl just has to recognize threre's a shebang, then skip it
 
 ;; as you may have already guessed comments start with ;
 ; single

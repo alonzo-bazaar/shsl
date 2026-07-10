@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
-;; -*- mode:clojurescript -*-
-;; this is a magic comment to tell emacs how to interpret the contents
-;; of this file (ie: open it as if it were a clojurescript file)
-;; nothing load bearing, just convenience
-
+;; -*- mode:clojure -*-
+;; vi: set ft=clojure;
 ;; the contents of the shebang don't matter unless you call this file like ./shebang.shsl
 ;; I'm using /usr/bin/env bash for shits and giggles
 ;; all that matters is that we skip it

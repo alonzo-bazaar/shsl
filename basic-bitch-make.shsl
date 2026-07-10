@@ -1,5 +1,6 @@
 #!./shsl
 ;; -*- mode:clojurescript -*-
+;; vi: set ft=clojure:
 (def cc "gcc")
 
 (def common-cflags ["-Wall" "-Wextra" "-Wpedantic" "-Wswitch" "-Wno-parentheses"

@@ -1,3 +1,6 @@
+;; -*- mode:clojure -*-
+;; vi: set ft=clojure;
+
 (def fib-naive
   (fn [a]
     (if (< a 0) (err "what the fuck bro")

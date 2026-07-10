@@ -1,4 +1,6 @@
+#!./shsl
 ;; -*- mode:clojurescript -*-
+;; vi: set ft=clojure:
 
 ;; currently assuming we're on linux, script shall be made platform
 ;; agnostic when we have the tools to make it platform agnostic
