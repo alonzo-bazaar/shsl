@@ -38,4 +38,9 @@
 (println "\\end{running shell tests}")
 (println "")
 
+(println "\\begin{running self tests}")
+(exec-vec ["./selftest.shsl"])
+(println "\\end{running shell tests}")
+(println "")
+
 (println "if nothing above aborted all tests pass!")

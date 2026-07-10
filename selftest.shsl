@@ -1,0 +1,100 @@
+#!./shsl
+;; -*- mode:clojure -*-
+;; :vi set ft=clojure:
+
+;; this is a port of most of the old test.sh file to shsl
+;; it's just more convenient for a lot of tasks than having to invoke
+;; shsl half a dozen times
+
+;; this should have been a macro :(
+(def asseq
+  (fn [expected actual extra-info]
+    (if (!= expected actual)
+      (do
+        (err (str "\"" expected "\""
+                  " was supposed to be equal to "
+                  "\"" actual "\""
+                  " but it's not")
+             extra-info)
+        (println "")))))
+
+;; basic operations
+(asseq  4 (+ 2 2) "addition")
+(asseq  4 (* 2 2) "multiplication")
+(asseq  0 (- 2 2) "subtraction")
+(asseq -1 (- 2 3) "subtraction order")
+
+;; basic serializations
+(asseq "a" (str 'a) "serializing symbol literals")
+(asseq "b" (str 'b) "serializing symbol literals")
+(asseq "t" (str t)  "t should be self evaluating")
+
+(asseq "(a b c d)" (str '(a b c d)) "serialize quoted list")
+(asseq "[a b c d]" (str '[a b c d]) "serialize quoted vector literals")
+(asseq "{a b c d}" (str '{a b c d}) "serialize quoted map literals")
+
+;; unquoted collections
+(asseq [1 2 3 4] [1 2 3 4]         "unquoted vectors")
+(asseq {1 2 3 4} {1 2 3 4}         "unquoted maps")
+(asseq [1 2 3 10] [1 2 3 (+ 5 5)]  "unquoted vectors with computed elements")
+(asseq {1 2 10 4} {1 2 (+ 6 4) 4}  "unquoted maps with computed keys")
+(asseq {1 2 3 10} {1 2 3 (+ 6 4)}  "unquoted maps with computed values")
+
+;; make sure empty collections work
+(asseq '() '() "empty list")
+
+(asseq [] []    "empty vector")
+(asseq [] '[]   "empty quoted vector")
+(asseq '[] []   "empty quoted vector")
+(asseq '[] '[]  "empty quoted vector")
+
+(asseq {} {}    "empty map")
+(asseq {} '{}   "empty quoted map")
+(asseq '{} '{}  "empty quoted map")
+(asseq '{} {}   "empty quoted map")
+
+;; if then else
+(asseq 'b (if nil 'a 'b)
+       "if nil then else")
+(asseq nil (if nil 'a)
+       "if nil then")
+(asseq 'a (if t 'a 'b)
+       "if t then else")
+(asseq 'a (if t 'a)
+       "if t then")
+(asseq 'a (if 'a 'a)
+       "if <something> then")
+(asseq 'a (if 'a 'a 'b)
+       "if <something> then else")
+(asseq nil (if (err "this is a test error don't worry" 'dwai) 'a)
+       "errors should be falsey")
+(asseq "goodbye" (if (!= "a" (str 'a)) "hello" "goodbye")
+       "if then else")
+(asseq nil (if (!= "a" (str 'a)) "hello")
+       "if then else")
+
+;; let&Co. blocks
+(asseq 10 (do (def a 10) (let [a [1 2 3]] a) a)
+       "let blocks should be local")
+(asseq [1 2 3] (do (def a [1 2 3]) (let [a 10] a) a)
+       "let blocks should be local")
+(asseq 10 (do (def a [1 2 3]) (let [a 10] a))
+       "do blocks should return the last thing therein")
+(asseq [1 2 3] (do (def a 10) (let [a [1 2 3]] a))
+       "do blocks should return the last thing therein")
+
+;; basic predicates
+(asseq t (nil? nil) "basic predicates")
+(asseq t (nil? '()) "basic predicates")
+(asseq nil (nil? t) "basic predicates")
+
+(asseq t (sym? t)      "basic predicates")
+(asseq t (sym? 'hello) "basic predicates")
+(asseq nil (sym? 'nil) "basic predicates")
+(asseq nil (sym? 10)   "basic predicates")
+
+;; advanced lambda fuckery
+(asseq 10000 (((fn [a] (fn [b] (a (a b)))) (fn [a] (* a a))) 10)
+       "advanced lambda fuckery")
+
+(println "\nend of tests! :D")

@@ -60,7 +60,7 @@ assert_shsl_equal  '0' "(- 2 2)" "subtraction"
 assert_shsl_equal '-1' "(- 2 3)" "subtraction order"
 
 # literals (warning: depends on pretty printing used)
-assert_shsl_equal '(a b c d)' "'(a b c d)" "quoted litst"
+assert_shsl_equal '(a b c d)' "'(a b c d)" "quoted list"
 assert_shsl_equal '[a b c d]' "'[a b c d]" "quoted vector literals"
 assert_shsl_equal '{a b c d}' "'{a b c d}" "quoted map literals"
 
@@ -99,10 +99,14 @@ assert_shsl_equal '30' "(set a 10) (def a 20) (def a 30)"
 
 # do blocks
 # (newlines in bash are fucking weird bruh)
-assert_shsl_equal $'fuckyou\nyou' "(do (print 'fuck) (println 'you))" "do blocks"
-assert_shsl_equal $'youfuck\nfuck' "(do (print 'you) (println 'fuck))" "do blocks"
-assert_shsl_equal $'fuck\nyou\nyou' "(do (println 'fuck) (println 'you))" "do blocks"
-assert_shsl_equal $'you\nfuck\nfuck' "(do (println 'you) (println 'fuck))" "do blocks"
+assert_shsl_equal $'fuckyou\nyou'\
+                  "(do (print 'fuck) (println 'you))" "do blocks"
+assert_shsl_equal $'youfuck\nfuck'\
+                  "(do (print 'you) (println 'fuck))" "do blocks"
+assert_shsl_equal $'fuck\nyou\nyou'\
+                  "(do (println 'fuck) (println 'you))" "do blocks"
+assert_shsl_equal $'you\nfuck\nfuck'\
+                  "(do (println 'you) (println 'fuck))" "do blocks"
 
 # let blocks
 assert_shsl_equal '10' "(def a 10) (let [a [1 2 3]] a) a"

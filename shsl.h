@@ -257,6 +257,8 @@ void shsl_vec_push(shsl_ref vec_obj, shsl_ref obj);
 shsl_ref shsl_vec_get(shsl_ref vec_obj, size_t i);
 void shsl_vec_set(shsl_ref vec_obj, size_t i, shsl_ref new_val);
 size_t shsl_vec_length(shsl_ref vec_obj);
+shsl_ref shsl_vec_last(shsl_ref vec_obj);
+shsl_ref shsl_vec_shallow_copy(shsl_ref vec_obj);
 // bit of shit, but this avoids polluting the body with extra symbols
 // although it does introduce a bit of overhead, sorry :|
 // (it should be easy enough for the compiler to remove the extra overhead)
@@ -736,8 +738,10 @@ typedef struct shsl_builtin_fn {
     shsl_ref(*apply)(shsl_ref args, shsl_ref env);
 } shsl_builtin_fn;
 typedef struct shsl_lambda_list {
-    shsl_ref positional; // must be vector
-    shsl_ref optional;   // map of symbol - default value
+    shsl_ref all;        // the entire parameter vector
+    shsl_ref variadic;   // may be either symbol or nil
+                         // if symbol then this function can bind variadic shit
+                         // if nil then we can't bind variadic shit
     shsl_ref keyword;    // map of symbol - default value
 } shsl_lambda_list;
 typedef struct shsl_user_fn {
@@ -1040,7 +1044,8 @@ shsl_ref shsl_mkvec(size_t initial_capacity) {
     return_mallocd_obj(.ref_count = 0,
 		       .type = SHSL_VEC,
 		       .vec = (shsl_vec) {
-			   .buf = (shsl_ref*)calloc(initial_capacity, sizeof(shsl_ref)),
+			   .buf = (shsl_ref*)calloc(initial_capacity,
+                                                    sizeof(shsl_ref)),
 			   .size = 0,
 			   .capacity = initial_capacity,
 		       },
@@ -1216,8 +1221,8 @@ void shsl_free(shsl_ref ref) {
 	break;
     case SHSL_USER_FN:
 	shsl_ref_del(ref.ptr->user_fn.env);
-        shsl_ref_del(ref.ptr->user_fn.lambda_list->positional);
-        shsl_ref_del(ref.ptr->user_fn.lambda_list->optional);
+        shsl_ref_del(ref.ptr->user_fn.lambda_list->all);
+        shsl_ref_del(ref.ptr->user_fn.lambda_list->variadic);
         shsl_ref_del(ref.ptr->user_fn.lambda_list->keyword);
         free(ref.ptr->user_fn.lambda_list);
 
@@ -1233,8 +1238,8 @@ void shsl_free(shsl_ref ref) {
 	break;
     case SHSL_USER_MACRO:
 	shsl_ref_del(ref.ptr->user_macro.env);
-        shsl_ref_del(ref.ptr->user_macro.lambda_list->positional);
-        shsl_ref_del(ref.ptr->user_macro.lambda_list->optional);
+        shsl_ref_del(ref.ptr->user_macro.lambda_list->all);
+        shsl_ref_del(ref.ptr->user_macro.lambda_list->variadic);
         shsl_ref_del(ref.ptr->user_macro.lambda_list->keyword);
         free(ref.ptr->user_macro.lambda_list);
 
@@ -1358,6 +1363,25 @@ void shsl_vec_set(shsl_ref vec_ref, size_t i, shsl_ref new_val) {
 size_t shsl_vec_length(shsl_ref vec_ref) {
     assert(shsl_is_vec(vec_ref));
     return vec_ref.ptr->vec.size;
+}
+shsl_ref shsl_vec_last(shsl_ref vec_obj) {
+    assert(shsl_is_vec(vec_obj));
+    return shsl_vec_get(vec_obj, shsl_vec_length(vec_obj)-1);
+}
+
+// make a different copy of size and capacity, but keep the
+// underlying buffer
+// useful to make transient slices
+shsl_ref shsl_vec_shallow_copy(shsl_ref orig) {
+    return_mallocd_obj(
+                       .ref_count = 0,
+                       .type = SHSL_VEC,
+                       .vec = (shsl_vec) {
+                           .buf = orig.ptr->vec.buf,
+                           .size = orig.ptr->vec.size,
+                           .capacity = orig.ptr->vec.capacity,
+                       },
+                      );
 }
 
 /// MAP MANIPULATIONS DEFINITIONS
@@ -2188,7 +2212,8 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
                             .lookup_symbol = shsl_ref_add(form));
 
     case SHSL_VEC: {
-        shsl_expr** elt_exprs = (shsl_expr**)calloc(shsl_vec_length(form), sizeof(shsl_expr*));
+        shsl_expr** elt_exprs = (shsl_expr**)calloc(shsl_vec_length(form),
+                                                    sizeof(shsl_expr*));
 
         // can't use shsl_form_list_to_expr_arr as vector forms aren't lists
         shsl_vec_foreach(i, form_elt, form) {
@@ -2200,9 +2225,10 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
                 for(size_t j = 0; j<i; ++j)
                     shsl_expr_free(elt_exprs[j]);
                 free(elt_exprs);
-                return shsl_expr_error(form,
-                                       "cannot parse vector because item at position "
-                                       "%zu of vector was malformed!", i);
+                return shsl_expr_error
+                    (form,
+                     "cannot parse vector because item at position "
+                     "%zu of vector was malformed!", i);
             }
         }
 
@@ -2214,8 +2240,10 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
     }
 
     case SHSL_MAP: {
-        shsl_expr** key_exprs = (shsl_expr**)calloc(form.ptr->map.size, sizeof(shsl_expr*));
-        shsl_expr** val_exprs = (shsl_expr**)calloc(form.ptr->map.size, sizeof(shsl_expr*));
+        shsl_expr** key_exprs = (shsl_expr**)calloc(form.ptr->map.size,
+                                                    sizeof(shsl_expr*));
+        shsl_expr** val_exprs = (shsl_expr**)calloc(form.ptr->map.size,
+                                                    sizeof(shsl_expr*));
 
         for(size_t i = 0; i<form.ptr->map.size; ++i) {
             shsl_expr* next_key = shsl_form_to_expr(form.ptr->map.buf[i].k);
@@ -2376,7 +2404,8 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
                 for(size_t i = 0; i<shsl_vec_length(binds_vec); i+=2)
                     shsl_vec_push(keys,shsl_vec_get(binds_vec, i));
 
-                shsl_expr** vals = (shsl_expr**)calloc(binds_length/2, sizeof(shsl_expr*)); 
+                shsl_expr** vals = (shsl_expr**)calloc(binds_length/2,
+                                                       sizeof(shsl_expr*)); 
                 for(size_t i = 1; i<shsl_vec_length(binds_vec); i+=2) {
                     shsl_expr* next =
                         shsl_form_to_expr(shsl_vec_get(binds_vec, i));
@@ -2491,7 +2520,7 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
             }
             else if(strcmp(s, "fn") == 0) {
                 // malformed lambda list non lo possiamo dare a eval time quindi
-                // la creazione della lambd list va fatta qua (parse don't validate)
+                // la creazione della lambda list va fatta qua
                 // ma, visto che vogliamo garantire che eval poi renda oggetti
                 // che non hanno memoria in comune con form/expression passate
                 // (per non segfaultare malissimo durante il free)
@@ -2499,6 +2528,8 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
                 // 
                 // idem per il body il che è un po' una rottura di coglioni
                 // a dirla tutta :/
+                // TODO: refcount? passa ownership? metti questa nullptr?
+                // meglio refcount, ma come? li rendo oggetti?
                 // 
                 // (fn [things] body)
                 // we don't support multimethods for now :/
@@ -2509,13 +2540,15 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
                          "a lambda list and a body, "
                          "this doesn't have a damn thing!");
 
-                if(!shsl_is_vec(shsl_nth(form, 1)))
+                shsl_ref ll_form = shsl_nth(form, 1);
+                if(!shsl_is_vec(ll_form))
                     return shsl_expr_error
                         (form,
                          "malformed fn expression, second element of function "
-                         "definition must be a symbol array!");
+                         "definition should be a symbol array, "
+                         "but here it's not even an array!");
 
-                shsl_vec_foreach(i, elt, shsl_nth(form, 1))
+                shsl_vec_foreach(i, elt, ll_form) {
                     if(!shsl_is_sym(elt)) {
                         // use 1-indexing for error reporting
                         // altering the index is not a problem since we're
@@ -2523,17 +2556,81 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
                         i++; 
                         return shsl_expr_error
                             (form,
-                             "malformed function definition, function arguments "
-                             "must all be symbols, but %zu%s argument of "
-                             "function definition was not a symbol!",
+                             "malformed fn_expression, function arguments "
+                             "must all be symbols, but %zu%s argument in the "
+                             "lambda list of this definition was not a symbol!",
                              (size_t)i, i==1?"st":i==2?"nd":i==3?"rd":"th");
                     }
+                }
+                // we currently only support positional or variadics with one
+                // variadic argument
+                // see if we're variadic
+                // (we mark the last symbol in the lambda list as refering to a
+                //  a variadic argument if the second to last element in the lambda
+                //  list is the symbol '&
+                //  if the symbol '& appears anywhere but in the second to last
+                //  position in the lambda list we consider that to be an error)
+                bool are_we_variadic = false;
+                shsl_vec_foreach(i, elt, ll_form) {
+                    if(strcmp(shsl_sym_name(elt), "&") == 0) {
+                        // we found a '&, but is the '& in the right place?
+                        if(i == shsl_vec_length(shsl_nth(form, 1)) - 2) {
+                            // is it really?
+                            if(strcmp(shsl_sym_name(shsl_vec_last(ll_form)), "&")
+                               == 0) {
+                                return shsl_expr_error
+                                    (form,
+                                     "&, when it appears in a lambda list, "
+                                     "should appear in the second to last "
+                                     "position of a lambda list, and in the "
+                                     "second to last position ONLY, what the "
+                                     "fuck is this supposed to be?");
+                            }
+                            // ok it is
+                            are_we_variadic = true;
+                            break;
+                        }
+                        else {
+                            // '& was not in the right place, report this fact
+                            // to the authorities
+                            // 
+                            // use 1-indexing for the error reporting
+                            // the (1-indexed) position '& is actually at
+                            size_t ac = i+1;
+                            // the (1-indexed) position in which '& was expected to
+                            // be at instead
+                            size_t ex = shsl_vec_length(shsl_nth(form, 1)) - 2 + 1;
+                            return shsl_expr_error
+                                (form,
+                                 "malformed function definition, symbol '& to "
+                                 "mark variadic argument must appear in the "
+                                 "second to last position in lambda list, but "
+                                 "it appears in the %zu%s position, whereas the "
+                                 "second to last position would be the %zu$s!",
+                                 (size_t)ac,
+                                 ac==1?"st":ac==2?"nd":ac==3?"rd":"th",
+                                 (size_t)ex,
+                                 ex==1?"st":ex==2?"nd":ex==3?"rd":"th");
+                        }
+                    }
+                }
 
-                // we currently only support positional shit so...
-                shsl_lambda_list* ll = (shsl_lambda_list*)malloc(sizeof(shsl_lambda_list));
-                ll->positional = shsl_ref_add(shsl_nth(form, 1));
-                ll->optional = shsl_ref_add(shsl_mkmap(1));
-                ll->keyword = shsl_ref_add(shsl_mkmap(1));
+                // create lambda list
+                shsl_lambda_list* ll
+                    = (shsl_lambda_list*)malloc(sizeof(shsl_lambda_list));
+
+                if(!are_we_variadic) {
+                    // purely positional lambda list
+                    ll->all = shsl_ref_add(ll_form);
+                    ll->variadic = shsl_ref_to_nil();
+                    ll->keyword = shsl_ref_add(shsl_mkmap(1));
+                }
+                else {
+                    // add the variadic argument
+                    ll->all = shsl_ref_add(ll_form);
+                    ll->variadic = shsl_ref_add(shsl_vec_last(ll_form));
+                    ll->keyword = shsl_ref_add(shsl_mkmap(1));
+                }
 
                 shsl_expr** body = shsl_form_list_to_expr_arr
                     (shsl_nthcdr(form, 2));
@@ -2544,8 +2641,8 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
                     err_ind++; // use 1 based indexing for the error reporting 
                     return shsl_expr_further_error
                         (err_expr,
-                         "cannot parse function expressioned, %zu%s expression in "
-                         "function body was malformed!",
+                         "cannot parse function expressioned, %zu%s "
+                         "expression in function body was malformed!",
                          (size_t)err_ind,
                          err_ind==1?"st":err_ind==2?"nd":err_ind==3?"rd":"th");
                 }
@@ -2717,8 +2814,8 @@ void shsl_expr_free(shsl_expr* expr) {
         free(expr);
         break;
     case SHSL_EXPR_FN:
-        shsl_ref_del(expr->fn_expr.lambda_list->positional);
-        shsl_ref_del(expr->fn_expr.lambda_list->optional);
+        shsl_ref_del(expr->fn_expr.lambda_list->all);
+        shsl_ref_del(expr->fn_expr.lambda_list->variadic);
         shsl_ref_del(expr->fn_expr.lambda_list->keyword);
         free(expr->fn_expr.lambda_list);
         shsl_free_expr_arr(expr->fn_expr.body, expr->fn_expr.body_length);
@@ -2876,11 +2973,12 @@ shsl_expr* shsl_expr_copy(shsl_expr* orig) {
         shsl_expr** body = (shsl_expr**)calloc(body_length, sizeof(shsl_expr*));
         for(size_t i = 0; i<body_length; ++i)
             body[i] = shsl_expr_copy(orig->fn_expr.body[i]);
-        shsl_lambda_list* lambda_list = (shsl_lambda_list*)malloc(sizeof(shsl_lambda_list));
-        lambda_list->positional=
-            shsl_ref_add(shsl_copy(orig->fn_expr.lambda_list->positional));
-        lambda_list->optional=
-            shsl_ref_add(shsl_copy(orig->fn_expr.lambda_list->optional));
+        shsl_lambda_list* lambda_list =
+            (shsl_lambda_list*)malloc(sizeof(shsl_lambda_list));
+        lambda_list->all=
+            shsl_ref_add(shsl_copy(orig->fn_expr.lambda_list->all));
+        lambda_list->variadic=
+            shsl_ref_add(shsl_copy(orig->fn_expr.lambda_list->variadic));
         lambda_list->keyword=
             shsl_ref_add(shsl_copy(orig->fn_expr.lambda_list->keyword));
         return_mallocd_expr
@@ -2929,21 +3027,73 @@ shsl_ref shsl_env_mkframe(shsl_ref syms, shsl_ref vals) {
     return frame;
 }
 // this function is instead called by shsl code during function calls,
-// it doesn't crash if it cannot return a valid env frame, it instead
-// returns an error 
+// it doesn't crash if it cannot return a valid env frame, because we don't want
+// shsl to crash if given incorrect input, we want it to instead report an error
+// to the caller, so this function *may* return an error, or it may return a
+// valid env frame.
 // callers of this function should make sure the value they get is a valid env 
 // frame, or they're gonna get some weird fucking bugs when looking for symbols
 // in error objects
-shsl_ref shsl_ll_env_mkframe(shsl_lambda_list* syms, shsl_ref vals) {
-    // TODO: only supports positional arguments so far
-    if(shsl_vec_length(syms->positional) != shsl_vec_length(vals))
-        return shsl_mkerr
-            (vals,
-             "expected exactly %zu positional arguments but %zu were provided",
-             shsl_vec_length(syms->positional), shsl_vec_length(vals));
+shsl_ref shsl_ll_env_mkframe(shsl_lambda_list* ll, shsl_ref vals) {
+    shsl_ref syms = ll->all;
+    if(shsl_is_nil(ll->variadic)) {
+        // purely positional
+        if(shsl_vec_length(syms) != shsl_vec_length(vals))
+            return shsl_mkerr
+                (vals,
+                 "expected exactly %zu positional arguments but %zu were provided",
+                 shsl_vec_length(syms), shsl_vec_length(vals));
+        return shsl_env_mkframe(syms, vals);
+    }
+    else {
+        // with variadics
+        // sanity check
+        // (if this assert fails it's a c side error and we should therefore crash)
+        assert(shsl_is_sym(ll->variadic));
 
-    return shsl_env_mkframe(syms->positional, vals);
+        size_t n_positional = shsl_vec_length(syms)-2;
+        size_t n_variadic = shsl_vec_length(vals)-n_positional;
+        if(n_positional > shsl_vec_length(vals))
+            return shsl_mkerr
+                (vals,
+                 "expected at least %zu arguments but %zu arguments were provided",
+                 n_positional, shsl_vec_length(vals));
+
+        // positional syms and positional vals
+        // slices of syms and vals respectively
+        shsl_ref psyms = shsl_vec_shallow_copy(syms);
+        psyms.ptr->vec.size = n_positional;
+        shsl_ref pvals = shsl_vec_shallow_copy(vals);
+        pvals.ptr->vec.size = n_positional;
+
+        shsl_ref frame = shsl_env_mkframe(psyms, pvals);
+
+        free(psyms.ptr);
+        free(pvals.ptr);
+
+        // variadic sym and variadic vals (vector)
+        shsl_ref vsym = ll->variadic;
+
+        // variadic vals is slice of vals, but it has to persist past this call
+        // this whole bit is kinda rawdoggy, I should make a separate function to
+        // create vector slices that ref_add
+        shsl_ref vvals;
+        shsl_ref* vbuf = calloc(n_variadic, sizeof(shsl_ref));
+        for(size_t i =0 ;i<n_variadic; i++)
+            vbuf[i] = shsl_ref_add(shsl_vec_get(vals, n_positional+i));
+        vvals.ptr = (shsl_obj*)malloc(sizeof(shsl_obj));
+        vvals.is_weak = false;
+        vvals.ptr->ref_count = 0;
+        vvals.ptr->type = SHSL_VEC;
+        vvals.ptr->vec.size = n_variadic;
+        vvals.ptr->vec.capacity = n_variadic;
+        vvals.ptr->vec.buf = vbuf;
+
+        shsl_map_set(frame, vsym, vvals);
+        return frame;
+    }
 }
+
 shsl_kv* shsl_env_find_kv(shsl_ref env, shsl_ref key) {
     assert(shsl_type(key) == SHSL_SYM);
     if(shsl_is_nil(env))
@@ -3130,10 +3280,10 @@ shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
         // in an expression
         shsl_lambda_list* lambda_list =
             (shsl_lambda_list*)malloc(sizeof(shsl_lambda_list));
-        lambda_list->positional = shsl_ref_add
-            (expr->fn_expr.lambda_list->positional);
-        lambda_list->optional = shsl_ref_add
-            (expr->fn_expr.lambda_list->optional);
+        lambda_list->all = shsl_ref_add
+            (expr->fn_expr.lambda_list->all);
+        lambda_list->variadic = shsl_ref_add
+            (expr->fn_expr.lambda_list->variadic);
         lambda_list->keyword = shsl_ref_add
             (expr->fn_expr.lambda_list->keyword);
 
@@ -3517,6 +3667,7 @@ shsl_defun(shsl_builtin_str, "str", args, env, {
 
         if(sb.size == 0)
             shsl_mkstr("");
+        shsl_sb_push(&sb, '\0');
         return shsl_mkstr_nocopy(shsl_sb_get(&sb));
     })
 
@@ -4171,10 +4322,14 @@ void shsl_dbg_fputtok(const shsl_token* tok, FILE* stream) {
     shsl_fpr(tok->ref, stream);
 }
 void shsl_fpr(const shsl_ref ref, FILE* stream) {
-    fputs(shsl_dump(ref), stream);
+    char* c = shsl_dump(ref);
+    fputs(c, stream);
+    free(c);
 }
 void shsl_fprint(const shsl_ref ref, FILE* stream) {
-    fputs(shsl_to_str(ref), stream);
+    char* c = shsl_to_str(ref);
+    fputs(c, stream);
+    free(c);
 }
 
 //// USER FACING FUNCTIONS DEFINITIONS
