@@ -6,16 +6,19 @@
 ;; it's just more convenient for a lot of tasks than having to invoke
 ;; shsl half a dozen times
 
+(def log-always nil)
+
 ;; this should have been a macro :(
 (def asseq
-  (fn [expected actual extra-info]
+  (fn [expected actual testname]
+    (if log-always (println (str "testing: [" testname "]")))
     (if (!= expected actual)
       (do
         (err (str "\"" expected "\""
                   " was supposed to be equal to "
                   "\"" actual "\""
                   " but it's not")
-             extra-info)
+             testname)
         (println "")))))
 
 ;; basic operations

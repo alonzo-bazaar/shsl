@@ -1,0 +1,10 @@
+* destructuring set (and def)
+below is a comment extracted and readapted from the source code 
+(this sould be refined and probably made to resemble more what clojure does)
+
+have either (set <symbol> <expr>), which would work as you'd expect
+or
+(set (<symbol>+) <expr>) where expr may return a sequence (list or vector), or return a sequence
+and if that happens we set the elements of (<symbol>+) to the elements of that sequence in order
+if sequence exceeds we bind the last symbol to the sequence's tail of unassigned values
+if the symbols exceed then we bind all the symbols we don't have values for to nil

@@ -20,7 +20,7 @@
 #include<assert.h>
 #include<errno.h>
 
-// for fork/exec
+// for fork/exec (to be moved to shsl_exec.h when the time comes)
 #include<unistd.h>
 #include<sys/wait.h>
 
@@ -431,7 +431,7 @@ shsl_expr* shsl_expr_further_error(shsl_expr* orig, const char* msg, ...);
 /// PARSING UTILITIES DECLARATIONS
 // parse a (cons) list of forms into an array of expression pointers
 // if it encounters a parser error it adds the error to the array then stops
-shsl_expr** shsl_form_list_to_expr_arr(shsl_ref form);
+shsl_expr** shsl_form_list_to_expr_arr(shsl_ref form, shsl_ref env);
 // return index of first parser error in expression array
 // or -1 if none of the expressions in the array are parser errors
 ssize_t shsl_expr_arr_find_err(shsl_expr** arr, size_t len);
@@ -444,7 +444,9 @@ void shsl_free_expr_arr(shsl_expr** arr, size_t len);
 /// FORM TRANSLATION FUNCTIONS DECLARATIONS
 // translate shsl object form representing some expression into corresponding
 // expression object
-shsl_expr* shsl_form_to_expr(shsl_ref form);
+// takes an env as it also handles macro expansion and thus needs a place to look
+// those macros up in case
+shsl_expr* shsl_form_to_expr(shsl_ref form, shsl_ref env);
 
 // free expression object (expression objects are malloc'd)
 void shsl_expr_free(shsl_expr* expr);
@@ -464,13 +466,19 @@ shsl_ref shsl_ll_env_mkframe(shsl_lambda_list* syms, shsl_ref vals);
 // find kv pair in environment correspinding to key, or NULL if no such pair exists
 shsl_kv* shsl_env_find_kv(shsl_ref env, shsl_ref key);
 shsl_ref shsl_env_lookup(shsl_ref env, shsl_ref key);
+shsl_ref shsl_env_lookup_or(shsl_ref env, shsl_ref key, shsl_ref def);
 shsl_ref shsl_env_set(shsl_ref env, shsl_ref key, shsl_ref new_val);
 shsl_ref shsl_env_def(shsl_ref env, shsl_ref key, shsl_ref new_val);
+
+// calling functions (for eval, and also other shit)
+shsl_ref shsl_call_builtin_fn(shsl_ref fn, shsl_ref args);
+shsl_ref shsl_call_user_fn(shsl_ref fn, shsl_ref args);
 
 // evaluate expression and return its value
 shsl_ref shsl_eval(shsl_expr* form, shsl_ref env);
 shsl_ref shsl_eval_many_into_vec(shsl_expr** args, size_t args_length,
                                  shsl_ref env);
+shsl_ref shsl_eval_sequence(shsl_expr** seq, size_t seq_length, shsl_ref env);
 
 /// BUILTIN FUNCTIONS DECLARATIONS
 // that is, definition of the functions that will be visible as builtins
@@ -2085,7 +2093,7 @@ typedef struct shsl_fn_expr {
 typedef struct shsl_macro_expr {
     shsl_lambda_list* lambda_list;
     shsl_expr** body;
-    shsl_expr** body_length;
+    size_t body_length;
 } shsl_macro_expr;
 typedef struct shsl_funcall_expr {
     shsl_expr* fn_expr;
@@ -2164,7 +2172,7 @@ shsl_expr* shsl_expr_further_error(shsl_expr* orig, const char* msg, ...) {
 }
 
 /// PARSING UTILITIES DEFINITIONS
-shsl_expr** shsl_form_list_to_expr_arr(shsl_ref form) {
+shsl_expr** shsl_form_list_to_expr_arr(shsl_ref form, shsl_ref env) {
     // returns an array of forms parsed starting from form onwards until nil
     // ie: parses the whole subtree starting at form
     // if it encounters an error form while parsing it adds it to the array and
@@ -2177,7 +2185,7 @@ shsl_expr** shsl_form_list_to_expr_arr(shsl_ref form) {
     size_t len = shsl_list_length(form);
     shsl_expr** res = (shsl_expr**)calloc(len, sizeof(shsl_expr*));
     for(size_t i = 0; i<len; ++i) {
-        res[i] = shsl_form_to_expr(shsl_nth(form, i));
+        res[i] = shsl_form_to_expr(shsl_nth(form, i), env);
     }
     return res;
 }
@@ -2198,7 +2206,13 @@ void shsl_free_expr_arr(shsl_expr** arr, size_t len) {
 }
 
 /// FORM TRANSLATION FUNCTIONS DEFINITIONS
-shsl_expr* shsl_form_to_expr(shsl_ref form) {
+// (we pass an env to this because shsl_form_to_expr is also responsible for
+//  macro expansion (it was easier to put it here than to make a separate
+//  function for it, forms are far more malleable when they're still lists
+//  and shit, calling macroexpand on expression would be a royal pain in the
+//  ass, I tried))
+shsl_expr* shsl_form_to_expr(shsl_ref form, shsl_ref env) {
+
     switch(form.ptr->type) {
     case SHSL_INT:
     case SHSL_REAL:
@@ -2217,7 +2231,7 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
 
         // can't use shsl_form_list_to_expr_arr as vector forms aren't lists
         shsl_vec_foreach(i, form_elt, form) {
-            shsl_expr* next = shsl_form_to_expr(form_elt);
+            shsl_expr* next = shsl_form_to_expr(form_elt, env);
             if(!shsl_expr_is_error(next)) {
                 elt_exprs[i] = next;
             }
@@ -2246,8 +2260,8 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
                                                     sizeof(shsl_expr*));
 
         for(size_t i = 0; i<form.ptr->map.size; ++i) {
-            shsl_expr* next_key = shsl_form_to_expr(form.ptr->map.buf[i].k);
-            shsl_expr* next_val = shsl_form_to_expr(form.ptr->map.buf[i].v);
+            shsl_expr* next_key = shsl_form_to_expr(form.ptr->map.buf[i].k, env);
+            shsl_expr* next_val = shsl_form_to_expr(form.ptr->map.buf[i].v, env);
 
             if(!(shsl_expr_is_error(next_key) || shsl_expr_is_error(next_val))) {
                 key_exprs[i] = next_key;
@@ -2320,7 +2334,8 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
                     return shsl_expr_error
                         (form, "malformed if expression, too long");
                                 
-                shsl_expr** body = shsl_form_list_to_expr_arr(shsl_cdr(form));
+                shsl_expr** body = shsl_form_list_to_expr_arr(shsl_cdr(form),
+                                                              env);
                 ssize_t  err_ind = shsl_expr_arr_find_err(body, form_length-1);
                 if(err_ind != -1) {
                     // get error
@@ -2408,7 +2423,7 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
                                                        sizeof(shsl_expr*)); 
                 for(size_t i = 1; i<shsl_vec_length(binds_vec); i+=2) {
                     shsl_expr* next =
-                        shsl_form_to_expr(shsl_vec_get(binds_vec, i));
+                        shsl_form_to_expr(shsl_vec_get(binds_vec, i), env);
                     if(!shsl_expr_is_error(next))
                         vals[i/2] = next;
                     else {
@@ -2422,7 +2437,8 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
                     }
                 }
 
-                shsl_expr** body = shsl_form_list_to_expr_arr(shsl_nthcdr(form, 2));
+                shsl_expr** body = shsl_form_list_to_expr_arr
+                    (shsl_nthcdr(form, 2), env);
                 ssize_t  err_ind = shsl_expr_arr_find_err(body, form_length-2);
                 if(err_ind != -1) {
                     shsl_expr* err_expr = body[err_ind];
@@ -2454,14 +2470,15 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
                          "loop condition, there's nothing here!");
 
                 // (while <expr> <body-exprs>*)
-                shsl_expr* condition = shsl_form_to_expr(shsl_nth(form, 1));
+                shsl_expr* condition = shsl_form_to_expr(shsl_nth(form, 1), env);
                 if(shsl_expr_is_error(condition))
                     return shsl_expr_further_error
                         (condition,
                          "cannot parse while expression, malformed loop "
                          "condition!");
 
-                shsl_expr** body = shsl_form_list_to_expr_arr(shsl_nthcdr(form, 2));
+                shsl_expr** body = shsl_form_list_to_expr_arr
+                    (shsl_nthcdr(form, 2), env);
                 ssize_t  err_ind = shsl_expr_arr_find_err(body, form_length-2);
                 if(err_ind != -1) {
                     shsl_expr* err_expr = body[err_ind];
@@ -2482,8 +2499,14 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
                                         .body_length = form_length - 2,
                                     });
             }
-            else if(strcmp(s, "do") == 0) {
-                shsl_expr** body = shsl_form_list_to_expr_arr(shsl_cdr(form));
+            // do forms and do-poking forms are too similar in syntax
+            // and creation for two different arms of this if then else
+            // to be justifiable imo, so we're merging the handling and
+            // dispatching at the end on "which side were we parsing? good"
+            else if((strcmp(s, "do") == 0) || (strcmp(s, "do-poking") == 0)) {
+                bool are_we_do = (strcmp(s, "do") == 0);
+                shsl_expr** body = shsl_form_list_to_expr_arr
+                    (shsl_cdr(form), env);
                 ssize_t  err_ind = shsl_expr_arr_find_err(body, form_length-1);
                 if(err_ind != -1) {
                     shsl_expr* err_expr = body[err_ind];
@@ -2491,62 +2514,98 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
                     err_ind++; // use 1 based indexing for the error reporting 
                     return shsl_expr_further_error
                         (err_expr,
-                         "cannot parse do expression because expression at "
-                         "position %zu in body was malformed", (size_t)err_ind);
+                         "cannot parse %s expression because expression at "
+                         "position %zu in body was malformed",
+                         s, (size_t)err_ind);
                 }
-                return_mallocd_expr(.type = SHSL_EXPR_DO,
-                                    .do_expr = (shsl_do_expr) {
-                                        .body = body,
-                                        .body_length = (form_length-1),
-                                    });
+                if(are_we_do)
+                    return_mallocd_expr(.type = SHSL_EXPR_DO,
+                                        .do_expr = (shsl_do_expr) {
+                                            .body = body,
+                                            .body_length = (form_length-1),
+                                        });
+                else
+                    return_mallocd_expr(.type = SHSL_EXPR_DO_POKING,
+                                        .do_poking_expr = (shsl_do_poking_expr) {
+                                            .body = body,
+                                            .body_length = (form_length-1),
+                                        });
             }
-            else if(strcmp(s, "do-poking") == 0) {
-                shsl_expr** body = shsl_form_list_to_expr_arr(shsl_cdr(form));
-                ssize_t  err_ind = shsl_expr_arr_find_err(body, form_length-1);
-                if(err_ind != -1) {
-                    shsl_expr* err_expr = body[err_ind];
-                    shsl_free_expr_arr(body, err_ind);
-                    err_ind++; // use 1 based indexing for the error reporting 
+            // same reasoning as above
+            else if((strcmp(s, "set") == 0) || (strcmp(s, "def") == 0)) {
+                bool are_we_set = (strcmp(s, "set") == 0);
+                // TODO
+                // we currently only support (set/def <name> <val>)
+                // I'd like set to be destructuring
+                if(form_length != 3)
+                    return shsl_expr_error
+                        (form,
+                         "%s expression must be of the for (%s <name> <val>) "
+                         "and thus have length of exactly 3, "
+                         "invalid %s expression length"
+                         "of %zu", s, s, s, form_length);
+                if(!shsl_is_sym(shsl_nth(form, 1)))
+                    return shsl_expr_error
+                        (form,
+                         "invalid %s expression, in (%s <name> <val>) "
+                         "<name> must be a symbol, provided name is not "
+                         "a symbol", s, s);
+                shsl_expr* value = shsl_form_to_expr(shsl_nth(form, 2), env);
+                if(shsl_expr_is_error(value))
                     return shsl_expr_further_error
-                        (err_expr,
-                         "cannot parse do-poking expression because expression "
-                         "at position %zu in body was malformed", (size_t)err_ind);
-                }
-                return_mallocd_expr(.type = SHSL_EXPR_DO,
-                                    .do_expr = (shsl_do_expr) {
-                                        .body = body,
-                                        .body_length = (form_length-1),
-                                    });
+                        (value,
+                         "cannot parse %s expression because value "
+                         " is malformed", s);
+                if(are_we_set)
+                    return_mallocd_expr
+                        (.type = SHSL_EXPR_SET,
+                         .set_expr = (shsl_set_expr) {
+                             .name = shsl_ref_add(shsl_nth(form, 1)),
+                             .value = value,
+                         });
+                else
+                    return_mallocd_expr
+                        (.type = SHSL_EXPR_DEF,
+                         .def_expr = (shsl_def_expr) {
+                             .name = shsl_ref_add(shsl_nth(form, 1)),
+                             .value = value,
+                         });
             }
-            else if(strcmp(s, "fn") == 0) {
-                // malformed lambda list non lo possiamo dare a eval time quindi
-                // la creazione della lambda list va fatta qua
-                // ma, visto che vogliamo garantire che eval poi renda oggetti
-                // che non hanno memoria in comune con form/expression passate
-                // (per non segfaultare malissimo durante il free)
-                // questa lambda list va poi copiata quando famo l'eval
+            // same reasoning as above
+
+            else if((strcmp(s, "fn") == 0) || (strcmp(s, "macro") == 0)) {
+                bool are_we_fn = (strcmp(s, "fn") == 0);
+                // malformed lambda list should be caught at compiletime so
+                // lambda list validation is gonna go here
+                // and since I like to have validation and parsing logic together
+                // lambda list creation is also gonna go here
                 // 
-                // idem per il body il che è un po' una rottura di coglioni
-                // a dirla tutta :/
-                // TODO: refcount? passa ownership? metti questa nullptr?
-                // meglio refcount, ma come? li rendo oggetti?
+                // also, we (currently) want the memory used for parsed objects
+                // to be as disjoint as possible from the memory used for live
+                // objects, so when the lambda list we creaeted goes from
+                // parsed object to live object... we're likely have to copy
+                // a bunch of shit
                 // 
-                // (fn [things] body)
+                // a mildly more annoying consequence of this isolation we seek
+                // is that the parsed function/macro body will also have to be
+                // copied when passing it to the live function object
+
+                // (fn/macro [things] body)
                 // we don't support multimethods for now :/
                 if(form_length < 2)
                     return shsl_expr_error
                         (form,
-                         "malformed fn expression, a fn expression must have "
+                         "malformed %s expression, a fn expression must have "
                          "a lambda list and a body, "
-                         "this doesn't have a damn thing!");
+                         "this doesn't have a damn thing!", s);
 
                 shsl_ref ll_form = shsl_nth(form, 1);
                 if(!shsl_is_vec(ll_form))
                     return shsl_expr_error
                         (form,
-                         "malformed fn expression, second element of function "
+                         "malformed %s expression, second element of function "
                          "definition should be a symbol array, "
-                         "but here it's not even an array!");
+                         "but here it's not even an array!", s);
 
                 shsl_vec_foreach(i, elt, ll_form) {
                     if(!shsl_is_sym(elt)) {
@@ -2556,10 +2615,12 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
                         i++; 
                         return shsl_expr_error
                             (form,
-                             "malformed fn_expression, function arguments "
-                             "must all be symbols, but %zu%s argument in the "
+                             "malformed %s expression, all arguments "
+                             "must be symbols, but %zu%s argument in the "
                              "lambda list of this definition was not a symbol!",
-                             (size_t)i, i==1?"st":i==2?"nd":i==3?"rd":"th");
+                             s,
+                             (size_t)i,
+                             i==1?"st":i==2?"nd":i==3?"rd":"th");
                     }
                 }
                 // we currently only support positional or variadics with one
@@ -2602,11 +2663,12 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
                             size_t ex = shsl_vec_length(shsl_nth(form, 1)) - 2 + 1;
                             return shsl_expr_error
                                 (form,
-                                 "malformed function definition, symbol '& to "
-                                 "mark variadic argument must appear in the "
-                                 "second to last position in lambda list, but "
+                                 "malformed lambda list in %s expression, "
+                                 "'&, used to mark last argument as a variadic, "
+                                 "must appear in the second to last position in "
+                                 "the lambda list, but here "
                                  "it appears in the %zu%s position, whereas the "
-                                 "second to last position would be the %zu$s!",
+                                 "second to last position would be the %zu%s!",
                                  (size_t)ac,
                                  ac==1?"st":ac==2?"nd":ac==3?"rd":"th",
                                  (size_t)ex,
@@ -2633,7 +2695,7 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
                 }
 
                 shsl_expr** body = shsl_form_list_to_expr_arr
-                    (shsl_nthcdr(form, 2));
+                    (shsl_nthcdr(form, 2), env);
                 ssize_t err_ind = shsl_expr_arr_find_err(body, form_length-2);
                 if(err_ind != -1) {
                     shsl_expr* err_expr = body[err_ind];
@@ -2646,111 +2708,112 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
                          (size_t)err_ind,
                          err_ind==1?"st":err_ind==2?"nd":err_ind==3?"rd":"th");
                 }
-                return_mallocd_expr(.type = SHSL_EXPR_FN,
-                                    .fn_expr = (shsl_fn_expr) {
-                                        .lambda_list = ll,
-                                        .body = body,
-                                        .body_length = form_length-2,
+                if(are_we_fn)
+                    return_mallocd_expr(.type = SHSL_EXPR_FN,
+                                        .fn_expr = (shsl_fn_expr) {
+                                            .lambda_list = ll,
+                                            .body = body,
+                                            .body_length = form_length-2,
+                                        });
+                else
+                    return_mallocd_expr(.type = SHSL_EXPR_MACRO,
+                                        .macro_expr = (shsl_macro_expr) {
+                                            .lambda_list = ll,
+                                            .body = body,
+                                            .body_length = form_length-2,
+                                        });
+            }
+        }
+
+        // if none of the above matched then it's a funcall
+        // but we got two options now, is this a function call or a macro call?
+
+        // macros should be discoverable at compile time so we're gonna do a
+        // *bit* of compile time evaluation to figure out wether expr is a macro
+        // invocation
+        // 
+        // first of all, to make sure we're not fucking anything up by doing
+        // compile time evaluation, we'll say macros can only result
+        // from inline macros (if fn_expr is a macro expr)
+        // or as the result of a lookup (if fn_expr is a lookup expr)
+        // (with inline macros and this shit being all at runtime you could
+        //  probably compute macros at runtime and do some weird shit like that
+        //  but we're gonna just... not consider that case to exist for now)
+        shsl_expr* fn_expr = shsl_form_to_expr(form.ptr->cons.car, env);
+        shsl_ref fn = shsl_ref_to_nil();
+        if(fn_expr->type == SHSL_EXPR_MACRO) {
+            fn = shsl_eval(fn_expr, env);
+        }
+        else if(fn_expr->type == SHSL_EXPR_LOOKUP) {
+            // to avoid generating potential runtime errors at compiletime
+            // whenever a lookup for for a potential macro fails during
+            // macroexpansion time we're gonan use shsl_env_lookup_or
+            // instead of the regular shsl_env_lookup
+            // that would have been invoked by shsl_eval
+            // 
+            // this will return a default value on lookup failure
+            // instead of returning (and potentially logging) an error
+            // and as long as the default return value is not a macro, doesn't
+            // change shit for our purposes
+            fn = shsl_env_lookup_or(env,
+                                    fn_expr->lookup_symbol,
+                                    shsl_ref_to_nil());
+        }
+
+        if(shsl_is_macro(fn)) {
+            // macros are functions and functions expect their arguments inside
+            // a vector
+            shsl_cb args_builder = shsl_cb_make(SHSL_CB_VEC);
+            for(shsl_ref i = shsl_cdr(form); shsl_is_cons(i); i = shsl_cdr(i)) {
+                shsl_cb_add(&args_builder, shsl_car(i));
+            }
+            shsl_ref args_vec = shsl_cb_get(args_builder);
+            switch(shsl_type(fn)) {
+            case SHSL_BUILTIN_MACRO: {
+                shsl_ref new_form = shsl_call_builtin_fn(fn, args_vec);
+                shsl_ref_add(new_form);
+                shsl_expr* new_expr = shsl_form_to_expr(new_form, env);
+                shsl_ref_del(new_form);
+                return new_expr;
+            }
+            case SHSL_USER_MACRO: {
+                shsl_ref new_form = shsl_call_user_fn(fn, args_vec);
+                shsl_ref_add(new_form);
+                shsl_expr* new_expr = shsl_form_to_expr(new_form, env);
+                shsl_ref_del(new_form);
+                return new_expr;
+            }
+            default:
+                assert(0 && "this was supposed to be unreachable, I don't know "
+                       "how you got here but that's your problem now");
+            }
+        }
+        else {
+            shsl_expr** args = shsl_form_list_to_expr_arr(shsl_cdr(form), env);
+            ssize_t  err_ind = shsl_expr_arr_find_err(args, form_length-1);
+            if(err_ind != -1) {
+                shsl_expr* err_arg = args[err_ind];
+                shsl_free_expr_arr(args, err_ind);
+                err_ind++; // use 1 based indexing for the error reporting 
+                return shsl_expr_further_error
+                    (err_arg,
+                     "cannot parse function call because functions's "
+                     "%zu%s argument was a malformed expression",
+                     (size_t)err_ind,
+                     err_ind==1?"st":err_ind==2?"nd":err_ind==3?"rd":"th");
+                // this printing logic doesn't handle things like 32nd
+                // but if you pass 32 args to a function that's a you problem
+            }
+            else
+                return_mallocd_expr(.type = SHSL_EXPR_FUNCALL,
+                                    .funcall_expr = (shsl_funcall_expr) {
+                                        .fn_expr = fn_expr,
+                                        .args = args,
+                                        .args_length = form_length - 1,
                                     });
-            }
-            else if(strcmp(s, "set") == 0) {
-                // TODO
-                // we currently only support (set <name> <val>)
-                // I'd like set to be destructuring
-                // nothing too fancy, just have either
-                // (set <symbol> <expr>) which works as you'd expect
-                // or
-                // (set (<symbol>+) <expr>) where expr may return a sequence
-                // (list or vector)
-                // and if that happens we set the elements of (<symbol>+) to the
-                // elements of that sequence in order
-                // if sequence exceeds we bind the last symbol to the sequence's
-                // tail of unassigned values
-                // if the symbols exceed then we bind all the symbols we don't
-                // have values for to nil
-                if(form_length != 3)
-                    return shsl_expr_error
-                        (form,
-                         "set expression must have length exactly 3 "
-                         "(set <name> <val>), invalid set expression length"
-                         "of %zu", form_length);
-                if(!shsl_is_sym(shsl_nth(form, 1)))
-                    return shsl_expr_error
-                        (form,
-                         "invalid set expression, in (set <name> <val>) "
-                         "<name> must be a symbol, provided name is not "
-                         "a symbol");
-                shsl_expr* value = shsl_form_to_expr(shsl_nth(form, 2));
-                if(shsl_expr_is_error(value))
-                    return shsl_expr_further_error
-                        (value,
-                         "cannot parse set expression because value "
-                         " is malformed");
-                return_mallocd_expr
-                    (.type = SHSL_EXPR_SET,
-                     .set_expr = (shsl_set_expr) {
-                         .name = shsl_ref_add(shsl_nth(form, 1)),
-                         .value = value,
-                     });
-            }
-            else if(strcmp(s, "def") == 0) {
-                if(form_length != 3)
-                    return shsl_expr_error
-                        (form,
-                         "def expression must have length exactly 3 "
-                         "(def <name> <val>), invalid def expression length"
-                         "of %zu", form_length);
-                if(!shsl_is_sym(shsl_nth(form, 1)))
-                    return shsl_expr_error
-                        (form,
-                         "invalid def expressoin, in (def <name> <val>) "
-                         "<name> must be a symbol, provided name is not "
-                         "a symbol");
-                shsl_expr* value = shsl_form_to_expr(shsl_nth(form, 2));
-                if(shsl_expr_is_error(value))
-                    return shsl_expr_further_error
-                        (value,
-                         "cannot parse def expression because value "
-                         " is malformed");
-                return_mallocd_expr
-                    (.type = SHSL_EXPR_DEF,
-                     .def_expr = (shsl_def_expr) {
-                         .name = shsl_ref_add(shsl_nth(form, 1)),
-                         .value = value,
-                     });
-            }
         }
-
-        // if none of the above then it's a funcall
-        shsl_expr* fn_expr = shsl_form_to_expr(form.ptr->cons.car);
-        shsl_expr** args = shsl_form_list_to_expr_arr(shsl_cdr(form));
-        ssize_t  err_ind = shsl_expr_arr_find_err(args, form_length-1);
-        if(err_ind != -1) {
-            shsl_expr* err_arg = args[err_ind];
-            shsl_free_expr_arr(args, err_ind);
-            err_ind++; // use 1 based indexing for the error reporting 
-            return shsl_expr_further_error
-                (err_arg,
-                 "cannot parse function call because functions's "
-                 "%zu%s argument was a malformed expression",
-                 (size_t)err_ind,
-                 err_ind==1?"st":err_ind==2?"nd":err_ind==3?"rd":"th");
-            // this printing logic doesn't handle things like 32nd
-            // but if you pass 32 args to a function that's a you problem, sorry
-        }
-
-        return_mallocd_expr(.type = SHSL_EXPR_FUNCALL,
-                            .funcall_expr = (shsl_funcall_expr) {
-                                .fn_expr = fn_expr,
-                                .args = args,
-                                .args_length = form_length - 1,
-                            });
     }
         break;
-        // else if lambda_expr_p(c->cons.car)
-        // { compile to immediate lambda call }
-        // else
-        // { error }
     case SHSL_BUILTIN_FN:
     case SHSL_USER_FN:
     case SHSL_BUILTIN_MACRO:
@@ -2761,6 +2824,42 @@ shsl_expr* shsl_form_to_expr(shsl_ref form) {
     }
     assert(0 && "unreachable");
 }
+shsl_ref shsl_macroexpand_1(shsl_ref form, shsl_ref env) {
+    // this is the same logic of the macro expansion we do in shsl_form_to_expr
+    // (it's more or less copied from there)
+    // but this function exists mainly for debugging purposes
+    // it is *not* used for macro expansion during shsl's execution pipeline
+    if(shsl_type(form) != SHSL_CONS)
+        return form;
+
+    shsl_expr* fn_expr = shsl_form_to_expr(form.ptr->cons.car, env);
+    shsl_ref fn = shsl_ref_to_nil();
+    if(fn_expr->type == SHSL_EXPR_MACRO)
+        fn = shsl_eval(fn_expr, env);
+    if(fn_expr->type == SHSL_EXPR_LOOKUP)
+        fn = shsl_env_lookup_or(env,
+                                fn_expr->lookup_symbol,
+                                shsl_ref_to_nil());
+
+    if(shsl_is_macro(fn)) {
+        shsl_cb args_builder = shsl_cb_make(SHSL_CB_VEC);
+        for(shsl_ref i = shsl_cdr(form); shsl_is_cons(i); i = shsl_cdr(i)) {
+            shsl_cb_add(&args_builder, shsl_car(i));
+        }
+        shsl_ref args_vec = shsl_cb_get(args_builder);
+
+        switch(shsl_type(fn)) {
+        case SHSL_BUILTIN_MACRO:
+            return shsl_call_builtin_fn(fn, args_vec);
+        case SHSL_USER_MACRO:
+            return shsl_call_user_fn(fn, args_vec);
+        default:
+            assert(0 && "unreachable");
+        }
+    }
+    else return form;
+}
+
 void shsl_expr_free(shsl_expr* expr) {
     // recall
     // expressions don't own any shsl_obj they might contain
@@ -2821,9 +2920,13 @@ void shsl_expr_free(shsl_expr* expr) {
         shsl_free_expr_arr(expr->fn_expr.body, expr->fn_expr.body_length);
         free(expr);
         break;
-
     case SHSL_EXPR_MACRO:
-        assert(0 && "TODO: free macro expr");
+        shsl_ref_del(expr->macro_expr.lambda_list->all);
+        shsl_ref_del(expr->macro_expr.lambda_list->variadic);
+        shsl_ref_del(expr->macro_expr.lambda_list->keyword);
+        free(expr->macro_expr.lambda_list);
+        shsl_free_expr_arr(expr->macro_expr.body, expr->macro_expr.body_length);
+        free(expr);
         break;
 
     case SHSL_EXPR_DO:
@@ -2989,9 +3092,27 @@ shsl_expr* shsl_expr_copy(shsl_expr* orig) {
                  .body_length = body_length,
              });
     }
-        
-    case SHSL_EXPR_MACRO:
-        assert(0 && "TODO: copy macro expression");
+    case SHSL_EXPR_MACRO: {
+        size_t body_length = orig->macro_expr.body_length;
+        shsl_expr** body = (shsl_expr**)calloc(body_length, sizeof(shsl_expr*));
+        for(size_t i = 0; i<body_length; ++i)
+            body[i] = shsl_expr_copy(orig->macro_expr.body[i]);
+        shsl_lambda_list* lambda_list =
+            (shsl_lambda_list*)malloc(sizeof(shsl_lambda_list));
+        lambda_list->all=
+            shsl_ref_add(shsl_copy(orig->macro_expr.lambda_list->all));
+        lambda_list->variadic=
+            shsl_ref_add(shsl_copy(orig->macro_expr.lambda_list->variadic));
+        lambda_list->keyword=
+            shsl_ref_add(shsl_copy(orig->macro_expr.lambda_list->keyword));
+        return_mallocd_expr
+            (.type = SHSL_EXPR_MACRO,
+             .macro_expr = (shsl_macro_expr) {
+                 .lambda_list = lambda_list,
+                 .body = body,
+                 .body_length = body_length,
+             });
+    }
     case SHSL_EXPR_FUNCALL: {
         size_t args_length = orig->funcall_expr.args_length;
         shsl_expr** args = (shsl_expr**)calloc(args_length, sizeof(shsl_expr*));
@@ -3113,6 +3234,13 @@ shsl_ref shsl_env_lookup(shsl_ref env, shsl_ref key) {
         return shsl_mkerr(key, "symbol not found in environment!");
     return kv->v;
 }
+shsl_ref shsl_env_lookup_or(shsl_ref env, shsl_ref key, shsl_ref def) {
+    shsl_kv* kv = shsl_env_find_kv(env, key);
+    if(!kv)
+        return def;
+    return kv->v;
+}
+
 shsl_ref shsl_env_set(shsl_ref env, shsl_ref key, shsl_ref new_val) {
     assert(shsl_is_sym(key));
     assert(shsl_is_cons(env));
@@ -3145,6 +3273,46 @@ shsl_ref shsl_env_def(shsl_ref env, shsl_ref key, shsl_ref new_val) {
         shsl_fn_env_mark_weak(new_val);
 
     return new_val;
+}
+
+shsl_ref shsl_call_builtin_fn(shsl_ref fn, shsl_ref args) {
+    assert(shsl_type(fn) == SHSL_BUILTIN_FN ||
+           shsl_type(fn) == SHSL_BUILTIN_MACRO);
+    assert(shsl_type(args) == SHSL_VEC);
+    return fn.ptr->builtin_fn.apply (args, fn.ptr->builtin_fn.env);
+}
+
+shsl_ref shsl_call_user_fn(shsl_ref fn, shsl_ref args) {
+    assert(shsl_type(fn) == SHSL_USER_FN ||
+           shsl_type(fn) == SHSL_USER_MACRO);
+    assert(shsl_type(args) == SHSL_VEC);
+
+    size_t len = fn.ptr->user_fn.body_length;
+    if(len == 0)
+        return shsl_ref_to_nil();
+
+    shsl_ref inner_frame = shsl_ll_env_mkframe(fn.ptr->user_fn.lambda_list,
+                                               args);
+    if(shsl_is_err(inner_frame)) {
+        return shsl_mkerr
+            (inner_frame,
+             "could not correctly bind arguments during function call!");
+    }
+
+    shsl_ref inner_env =
+        shsl_mkcons (inner_frame, fn.ptr->user_fn.env);
+
+    shsl_ref_add(inner_env);
+    shsl_ref res = shsl_eval_sequence(fn.ptr->user_fn.body,
+                                      fn.ptr->user_fn.body_length,
+                                      inner_env);
+
+    // shitty hack because I fucked something up in some refcounting
+    // data contracts
+    res.ptr->ref_count++;
+    shsl_ref_del(inner_env);
+    res.ptr->ref_count--;
+    return res;
 }
 
 shsl_ref shsl_eval_sequence(shsl_expr** seq, size_t seq_length, shsl_ref env) {
@@ -3216,9 +3384,8 @@ shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
                                       env));
         switch(fn.ptr->type) {
         case SHSL_BUILTIN_FN: {
-            shsl_ref res = fn.ptr->builtin_fn.apply
-                (args, fn.ptr->builtin_fn.env);
-            
+            shsl_ref res = shsl_call_builtin_fn(fn, args);
+
             // ugly hack to make sure that if res was referenced by args
             // then freeing args doesn't void res
             res.ptr->ref_count++;
@@ -3228,30 +3395,9 @@ shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
             return res;
         }
         case SHSL_USER_FN: {
-            size_t len = fn.ptr->user_fn.body_length;
-            if(len == 0)
-                return shsl_ref_to_nil();
+            shsl_ref res = shsl_call_user_fn(fn, args);
 
-            shsl_ref inner_frame = shsl_ll_env_mkframe
-                (fn.ptr->user_fn.lambda_list, args);
-            if(shsl_is_err(inner_frame)) {
-                shsl_ref res = shsl_mkerr
-                    (inner_frame,
-                     "could not correctly bind arguments in function call!");
-                shsl_ref_del(fn);
-                shsl_ref_del(args);
-                return res;
-            }
-
-            shsl_ref inner_env =
-                shsl_mkcons (inner_frame, fn.ptr->user_fn.env);
-
-            shsl_ref_add(inner_env);
-            shsl_ref res = shsl_eval_sequence(fn.ptr->user_fn.body,
-                                              fn.ptr->user_fn.body_length,
-                                              inner_env);
             res.ptr->ref_count++;
-            shsl_ref_del(inner_env);
             shsl_ref_del(fn);
             shsl_ref_del(args);
             res.ptr->ref_count--;
@@ -3259,10 +3405,18 @@ shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
         }
         case SHSL_BUILTIN_MACRO:
             shsl_free(args);
-            return shsl_mkerr(fn, "not implemented yet!"); 
+            return shsl_mkerr
+                (fn, "macro call should have been handled at macro expand time, "
+                "it is an error to call a macro at eval time"); 
         case SHSL_USER_MACRO:
             shsl_free(args);
-            return shsl_mkerr(fn, "not implemented yet!"); 
+            return shsl_mkerr
+                (fn, "macro call should have been handled at macro expand time, "
+                "it is an error to call a macro at eval time"); 
+            // TODO: case SHSL_SYM:
+            // if argument is a map and symbol is a keyword then do the keyword
+            // thing
+            // further todo: make keywords self evaluating
         default:
             shsl_free(args);
             return shsl_mkerr(fn, "object is not callable!"); 
@@ -3288,6 +3442,27 @@ shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
             (expr->fn_expr.lambda_list->keyword);
 
         return shsl_mkuser_fn(env, lambda_list, body, body_length);
+    }
+    case SHSL_EXPR_MACRO: {
+        size_t body_length = expr->macro_expr.body_length;
+        shsl_expr** body = (shsl_expr**)calloc(body_length, sizeof(shsl_expr*));
+        for(size_t i = 0; i<body_length; ++i)
+            body[i] = shsl_expr_copy(expr->macro_expr.body[i]);
+
+        // TODO: copy?
+        // all our previous eval functions return "all fresh data"
+        // this would be a first n which we return data that was partially
+        // in an expression
+        shsl_lambda_list* lambda_list =
+            (shsl_lambda_list*)malloc(sizeof(shsl_lambda_list));
+        lambda_list->all = shsl_ref_add
+            (expr->macro_expr.lambda_list->all);
+        lambda_list->variadic = shsl_ref_add
+            (expr->macro_expr.lambda_list->variadic);
+        lambda_list->keyword = shsl_ref_add
+            (expr->macro_expr.lambda_list->keyword);
+
+        return shsl_mkuser_macro(env, lambda_list, body, body_length);
     }
 
     case SHSL_EXPR_DEF:
@@ -3331,8 +3506,6 @@ shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
         res.ptr->ref_count--;
         return res;
     }
-    case SHSL_EXPR_MACRO:
-        assert(0 && "TODO eval this kind of expression");
     }
     assert(0 && "unreachable");
 }
@@ -3944,6 +4117,12 @@ shsl_defun(shsl_builtin_and, "and", args, env, {
         return shsl_bool_to_obj(!any_false);
     })
 
+shsl_defun(shsl_builtin_macroexpand_1, "macroexpand-1", args, env, {
+        shsl_fn_assert_argslen(==1);
+        shsl_fn_assert_argtype_either(0, SHSL_NIL, SHSL_CONS);
+        return shsl_macroexpand_1(shsl_fn_arg(0), env);
+    })
+
 shsl_defun(shsl_builtin_exit, "exit", args, env, {
         // this function's a bit weird on the error management
         // if the user provides incorrect arguments to exit, we're gonna assume
@@ -4013,12 +4192,15 @@ shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
                  shsl_mkbuiltin_fn(env, shsl_builtin_ge));
     shsl_env_def(env, shsl_mksym("<="),
                  shsl_mkbuiltin_fn(env, shsl_builtin_le));
+
     // logical functions
     // (FIXME: very temporary, these should be macros to allow for short circuiting)
     shsl_env_def(env, shsl_mksym("and"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_and));
     shsl_env_def(env, shsl_mksym("or"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_or));
+    shsl_env_def(env, shsl_mksym("macroexpand-1"),
+                 shsl_mkbuiltin_fn(env, shsl_builtin_macroexpand_1));
 
     // data predicates
     shsl_env_def(env, shsl_mksym("nil?"),
@@ -4352,10 +4534,9 @@ shsl_ref shsl_eval_str(char* c, shsl_ref env) {
         // TODO: make form_to_expr accept an environment so we can
         // do macro expansion during form "compilation"?
         shsl_ref_add(p.ref);
-        shsl_expr* expr = shsl_form_to_expr(p.ref);
+        shsl_expr* expr = shsl_form_to_expr(p.ref, env);
         shsl_ref_del(p.ref);
 
-        // shsl_ref_del(res);
         shsl_ref_set(&curr, shsl_eval(expr, env));
         shsl_expr_free(expr);
     }

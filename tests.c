@@ -80,8 +80,8 @@ void test_map_builder(void) {
     shsl_free(map0);
 
     shsl_cb cb1 = shsl_cb_make(SHSL_CB_MAP);
-    shsl_cb_add(&cb1, shsl_mkint(1));
-    shsl_cb_add(&cb1, shsl_mkint(2));
+    shsl_cb_add(&cb1, shsl_mkstr("this map is supposed to fail"));
+    shsl_cb_add(&cb1, shsl_mkstr("if you see the error it's ok"));
     shsl_cb_add(&cb1, shsl_mkint(3));
     shsl_ref err = shsl_cb_get(cb1);
     assert(shsl_is_err(err)
