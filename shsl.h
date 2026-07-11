@@ -85,7 +85,7 @@ char* shsl_cat_strs_n(size_t n, ...);
 char* shsl_append_chars_n(const char* s, size_t n, ...);
 // concatenate a bunch of strings
 #define shsl_cat_strs(...)                                      \
-    shsl_str_cat_n(SHSL_ARG_COUNT(__VA_ARGS__), __VA_ARGS__)
+    shsl_cat_strs_n(SHSL_ARG_COUNT(__VA_ARGS__), __VA_ARGS__)
 // append a bunch characters at the end of a string
 #define shsl_append_chars(first, ...)                                      \
     shsl_append_chars_n(first, SHSL_ARG_COUNT(__VA_ARGS__), __VA_ARGS__)
@@ -159,7 +159,7 @@ shsl_ref shsl_weak_ref_from_ptr(shsl_obj* ptr);
 shsl_ref shsl_ref_add(shsl_ref obj);
 // marks removal of reference to object
 // may also delete the object if reference count reaches 0 
-void shsl_ref_del(shsl_ref obj);
+void shsl_ref_drop(shsl_ref obj);
 // marks a reference as weak, if reference was previously not weak
 // also decreases reference count of object it points to to make sure
 // it doesn't keep anything alive by itself
@@ -257,8 +257,10 @@ void shsl_vec_push(shsl_ref vec_obj, shsl_ref obj);
 shsl_ref shsl_vec_get(shsl_ref vec_obj, size_t i);
 void shsl_vec_set(shsl_ref vec_obj, size_t i, shsl_ref new_val);
 size_t shsl_vec_length(shsl_ref vec_obj);
+shsl_ref shsl_vec_first(shsl_ref vec_obj);
 shsl_ref shsl_vec_last(shsl_ref vec_obj);
 shsl_ref shsl_vec_shallow_copy(shsl_ref vec_obj);
+shsl_ref shsl_vec_slice(shsl_ref vec_obj, size_t first, size_t last);
 // bit of shit, but this avoids polluting the body with extra symbols
 // although it does introduce a bit of overhead, sorry :|
 // (it should be easy enough for the compiler to remove the extra overhead)
@@ -467,6 +469,7 @@ shsl_ref shsl_ll_env_mkframe(shsl_lambda_list* syms, shsl_ref vals);
 shsl_kv* shsl_env_find_kv(shsl_ref env, shsl_ref key);
 shsl_ref shsl_env_lookup(shsl_ref env, shsl_ref key);
 shsl_ref shsl_env_lookup_or(shsl_ref env, shsl_ref key, shsl_ref def);
+bool shsl_env_has(shsl_ref env, shsl_ref key);
 shsl_ref shsl_env_set(shsl_ref env, shsl_ref key, shsl_ref new_val);
 shsl_ref shsl_env_def(shsl_ref env, shsl_ref key, shsl_ref new_val);
 
@@ -543,7 +546,7 @@ shsl_ref shsl_builtin_println(shsl_ref args, shsl_ref env);
 
 // and given all these builtin functions we can create the initial environment
 // for shsl code evaluation
-shsl_ref shsl_make_initial_env(void);
+shsl_ref shsl_env_mkinitial(void);
 
 //// PRINT DEBUGGING DECLARATIONS
 //// ----------------------------------------------------------------------------
@@ -840,7 +843,7 @@ shsl_ref shsl_ref_add(shsl_ref ref) {
 	ref.ptr->ref_count++;
     return ref;
 }
-void shsl_ref_del(shsl_ref ref) {
+void shsl_ref_drop(shsl_ref ref) {
     if(ref.is_weak) {
 #ifdef SHSL_LOG_DEL_REF
         printf("[SHSL GC] not deleting ref to object %p\n", (void*)(ref.ptr));
@@ -872,13 +875,13 @@ void shsl_ref_del(shsl_ref ref) {
 }
 void shsl_ref_mark_weak(shsl_ref* ref) {
     if(!ref->is_weak) {
-        shsl_ref_del(*ref);
+        shsl_ref_drop(*ref);
         ref->is_weak = true;
     }
 }
 void shsl_ref_set(shsl_ref* dst, shsl_ref src) {
     shsl_ref_add(src);
-    shsl_ref_del(*dst);
+    shsl_ref_drop(*dst);
     dst->ptr = src.ptr;
     dst->is_weak = src.is_weak;
 }
@@ -1194,44 +1197,44 @@ void shsl_free(shsl_ref ref) {
 	break;
 
     case SHSL_SYM:
-	shsl_ref_del(ref.ptr->sym.name);
+	shsl_ref_drop(ref.ptr->sym.name);
 	free(ref.ptr);
 	break;
 
     case SHSL_ERR:
-	shsl_ref_del(ref.ptr->err.msg);
-	shsl_ref_del(ref.ptr->err.data);
+	shsl_ref_drop(ref.ptr->err.msg);
+	shsl_ref_drop(ref.ptr->err.data);
 	free(ref.ptr);
 	break;
     case SHSL_CONS:
-	shsl_ref_del(ref.ptr->cons.car);
-	shsl_ref_del(ref.ptr->cons.cdr);
+	shsl_ref_drop(ref.ptr->cons.car);
+	shsl_ref_drop(ref.ptr->cons.cdr);
 	free(ref.ptr);
 	break;
     case SHSL_VEC:
 	for(size_t i = 0; i<ref.ptr->vec.size; ++i)
-	    shsl_ref_del(ref.ptr->vec.buf[i]);
+	    shsl_ref_drop(ref.ptr->vec.buf[i]);
 	free(ref.ptr->vec.buf);
 	free(ref.ptr);
 	break;
     case SHSL_MAP:
 	for(size_t i = 0; i<ref.ptr->map.size; ++i) {
-	    shsl_ref_del(ref.ptr->map.buf[i].k);
-	    shsl_ref_del(ref.ptr->map.buf[i].v);
+	    shsl_ref_drop(ref.ptr->map.buf[i].k);
+	    shsl_ref_drop(ref.ptr->map.buf[i].v);
 	}
 	free(ref.ptr->map.buf);
 	free(ref.ptr);
 	break;
 
     case SHSL_BUILTIN_FN:
-	shsl_ref_del(ref.ptr->builtin_fn.env);
+	shsl_ref_drop(ref.ptr->builtin_fn.env);
 	free(ref.ptr);
 	break;
     case SHSL_USER_FN:
-	shsl_ref_del(ref.ptr->user_fn.env);
-        shsl_ref_del(ref.ptr->user_fn.lambda_list->all);
-        shsl_ref_del(ref.ptr->user_fn.lambda_list->variadic);
-        shsl_ref_del(ref.ptr->user_fn.lambda_list->keyword);
+	shsl_ref_drop(ref.ptr->user_fn.env);
+        shsl_ref_drop(ref.ptr->user_fn.lambda_list->all);
+        shsl_ref_drop(ref.ptr->user_fn.lambda_list->variadic);
+        shsl_ref_drop(ref.ptr->user_fn.lambda_list->keyword);
         free(ref.ptr->user_fn.lambda_list);
 
 	for(size_t i = 0; i<ref.ptr->user_fn.body_length; ++i)
@@ -1241,14 +1244,14 @@ void shsl_free(shsl_ref ref) {
 	free(ref.ptr);
 	break;
     case SHSL_BUILTIN_MACRO:
-	shsl_ref_del(ref.ptr->builtin_macro.env);
+	shsl_ref_drop(ref.ptr->builtin_macro.env);
 	free(ref.ptr);
 	break;
     case SHSL_USER_MACRO:
-	shsl_ref_del(ref.ptr->user_macro.env);
-        shsl_ref_del(ref.ptr->user_macro.lambda_list->all);
-        shsl_ref_del(ref.ptr->user_macro.lambda_list->variadic);
-        shsl_ref_del(ref.ptr->user_macro.lambda_list->keyword);
+	shsl_ref_drop(ref.ptr->user_macro.env);
+        shsl_ref_drop(ref.ptr->user_macro.lambda_list->all);
+        shsl_ref_drop(ref.ptr->user_macro.lambda_list->variadic);
+        shsl_ref_drop(ref.ptr->user_macro.lambda_list->keyword);
         free(ref.ptr->user_macro.lambda_list);
 
 	for(size_t i = 0; i<ref.ptr->user_macro.body_length; ++i)
@@ -1372,11 +1375,16 @@ size_t shsl_vec_length(shsl_ref vec_ref) {
     assert(shsl_is_vec(vec_ref));
     return vec_ref.ptr->vec.size;
 }
+shsl_ref shsl_vec_first(shsl_ref vec_obj) {
+    assert(shsl_is_vec(vec_obj));
+    if(shsl_vec_length(vec_obj) == 0)
+        return shsl_mkerr(vec_obj, "cannot get first element of empty array!");
+    return shsl_vec_get(vec_obj, 0);
+}
 shsl_ref shsl_vec_last(shsl_ref vec_obj) {
     assert(shsl_is_vec(vec_obj));
     return shsl_vec_get(vec_obj, shsl_vec_length(vec_obj)-1);
 }
-
 // make a different copy of size and capacity, but keep the
 // underlying buffer
 // useful to make transient slices
@@ -1390,6 +1398,20 @@ shsl_ref shsl_vec_shallow_copy(shsl_ref orig) {
                            .capacity = orig.ptr->vec.capacity,
                        },
                       );
+}
+shsl_ref shsl_vec_slice(shsl_ref vec_obj, size_t first, size_t last) {
+    assert(shsl_is_vec(vec_obj));
+    if(first > last)
+        return shsl_mkerr(vec_obj,
+                          "tried creating vector slice with beginning index "
+                          "greater than ending index! (begin %zu, end %zu)",
+                          first, last);
+    
+    size_t slice_size = last-first;
+    shsl_ref slice = shsl_mkvec(slice_size);
+    for(size_t i = 0; i<slice_size; ++i)
+        slice.ptr->vec.buf[i] = shsl_ref_add(shsl_vec_get(vec_obj, i));
+    return slice;
 }
 
 /// MAP MANIPULATIONS DEFINITIONS
@@ -2773,14 +2795,14 @@ shsl_expr* shsl_form_to_expr(shsl_ref form, shsl_ref env) {
                 shsl_ref new_form = shsl_call_builtin_fn(fn, args_vec);
                 shsl_ref_add(new_form);
                 shsl_expr* new_expr = shsl_form_to_expr(new_form, env);
-                shsl_ref_del(new_form);
+                shsl_ref_drop(new_form);
                 return new_expr;
             }
             case SHSL_USER_MACRO: {
                 shsl_ref new_form = shsl_call_user_fn(fn, args_vec);
                 shsl_ref_add(new_form);
                 shsl_expr* new_expr = shsl_form_to_expr(new_form, env);
-                shsl_ref_del(new_form);
+                shsl_ref_drop(new_form);
                 return new_expr;
             }
             default:
@@ -2869,11 +2891,11 @@ void shsl_expr_free(shsl_expr* expr) {
     // free any subexpression of the expression you're freeing rn
     switch(expr->type) {
     case SHSL_EXPR_LITERAL:
-        shsl_ref_del(expr->literal);
+        shsl_ref_drop(expr->literal);
         free(expr);
         break;
     case SHSL_EXPR_LOOKUP:
-        shsl_ref_del(expr->lookup_symbol);
+        shsl_ref_drop(expr->lookup_symbol);
         free(expr);
         break;
     case SHSL_EXPR_VEC:
@@ -2892,7 +2914,7 @@ void shsl_expr_free(shsl_expr* expr) {
         free(expr);
         break;
     case SHSL_EXPR_LET:
-        shsl_ref_del(expr->let_expr.keys);
+        shsl_ref_drop(expr->let_expr.keys);
         shsl_free_expr_arr(expr->let_expr.vals, expr->let_expr.binds_length);
         shsl_free_expr_arr(expr->let_expr.body, expr->let_expr.body_length);
         free(expr);
@@ -2903,27 +2925,27 @@ void shsl_expr_free(shsl_expr* expr) {
         free(expr);
         break;
     case SHSL_EXPR_DEF:
-        shsl_ref_del(expr->def_expr.name);
+        shsl_ref_drop(expr->def_expr.name);
         shsl_expr_free(expr->def_expr.value);
         free(expr);
         break;
     case SHSL_EXPR_SET:
-        shsl_ref_del(expr->set_expr.name);
+        shsl_ref_drop(expr->set_expr.name);
         shsl_expr_free(expr->set_expr.value);
         free(expr);
         break;
     case SHSL_EXPR_FN:
-        shsl_ref_del(expr->fn_expr.lambda_list->all);
-        shsl_ref_del(expr->fn_expr.lambda_list->variadic);
-        shsl_ref_del(expr->fn_expr.lambda_list->keyword);
+        shsl_ref_drop(expr->fn_expr.lambda_list->all);
+        shsl_ref_drop(expr->fn_expr.lambda_list->variadic);
+        shsl_ref_drop(expr->fn_expr.lambda_list->keyword);
         free(expr->fn_expr.lambda_list);
         shsl_free_expr_arr(expr->fn_expr.body, expr->fn_expr.body_length);
         free(expr);
         break;
     case SHSL_EXPR_MACRO:
-        shsl_ref_del(expr->macro_expr.lambda_list->all);
-        shsl_ref_del(expr->macro_expr.lambda_list->variadic);
-        shsl_ref_del(expr->macro_expr.lambda_list->keyword);
+        shsl_ref_drop(expr->macro_expr.lambda_list->all);
+        shsl_ref_drop(expr->macro_expr.lambda_list->variadic);
+        shsl_ref_drop(expr->macro_expr.lambda_list->keyword);
         free(expr->macro_expr.lambda_list);
         shsl_free_expr_arr(expr->macro_expr.body, expr->macro_expr.body_length);
         free(expr);
@@ -3181,35 +3203,15 @@ shsl_ref shsl_ll_env_mkframe(shsl_lambda_list* ll, shsl_ref vals) {
                  n_positional, shsl_vec_length(vals));
 
         // positional syms and positional vals
-        // slices of syms and vals respectively
-        shsl_ref psyms = shsl_vec_shallow_copy(syms);
-        psyms.ptr->vec.size = n_positional;
-        shsl_ref pvals = shsl_vec_shallow_copy(vals);
-        pvals.ptr->vec.size = n_positional;
-
-        shsl_ref frame = shsl_env_mkframe(psyms, pvals);
-
-        free(psyms.ptr);
-        free(pvals.ptr);
-
+        shsl_ref psyms = shsl_ref_add(shsl_vec_slice(syms, 0, n_positional));
+        shsl_ref pvals = shsl_ref_add(shsl_vec_slice(vals, 0, n_positional));
         // variadic sym and variadic vals (vector)
         shsl_ref vsym = ll->variadic;
+        shsl_ref vvals = shsl_vec_slice(vals, n_positional, n_variadic);
 
-        // variadic vals is slice of vals, but it has to persist past this call
-        // this whole bit is kinda rawdoggy, I should make a separate function to
-        // create vector slices that ref_add
-        shsl_ref vvals;
-        shsl_ref* vbuf = calloc(n_variadic, sizeof(shsl_ref));
-        for(size_t i =0 ;i<n_variadic; i++)
-            vbuf[i] = shsl_ref_add(shsl_vec_get(vals, n_positional+i));
-        vvals.ptr = (shsl_obj*)malloc(sizeof(shsl_obj));
-        vvals.is_weak = false;
-        vvals.ptr->ref_count = 0;
-        vvals.ptr->type = SHSL_VEC;
-        vvals.ptr->vec.size = n_variadic;
-        vvals.ptr->vec.capacity = n_variadic;
-        vvals.ptr->vec.buf = vbuf;
-
+        shsl_ref frame = shsl_env_mkframe(psyms, pvals);
+        shsl_ref_drop(psyms);
+        shsl_ref_drop(pvals);
         shsl_map_set(frame, vsym, vvals);
         return frame;
     }
@@ -3239,6 +3241,10 @@ shsl_ref shsl_env_lookup_or(shsl_ref env, shsl_ref key, shsl_ref def) {
     if(!kv)
         return def;
     return kv->v;
+}
+bool shsl_env_has(shsl_ref env, shsl_ref key) {
+    shsl_kv* kv = shsl_env_find_kv(env, key);
+    return kv != NULL;
 }
 
 shsl_ref shsl_env_set(shsl_ref env, shsl_ref key, shsl_ref new_val) {
@@ -3310,7 +3316,7 @@ shsl_ref shsl_call_user_fn(shsl_ref fn, shsl_ref args) {
     // shitty hack because I fucked something up in some refcounting
     // data contracts
     res.ptr->ref_count++;
-    shsl_ref_del(inner_env);
+    shsl_ref_drop(inner_env);
     res.ptr->ref_count--;
     return res;
 }
@@ -3366,7 +3372,7 @@ shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
                                           expr->do_expr.body_length,
                                           inner_env);
         res.ptr->ref_count++;
-        shsl_ref_del(inner_env);
+        shsl_ref_drop(inner_env);
         res.ptr->ref_count--;
         return res;
     }
@@ -3389,8 +3395,8 @@ shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
             // ugly hack to make sure that if res was referenced by args
             // then freeing args doesn't void res
             res.ptr->ref_count++;
-            shsl_ref_del(fn);
-            shsl_ref_del(args);
+            shsl_ref_drop(fn);
+            shsl_ref_drop(args);
             res.ptr->ref_count--;
             return res;
         }
@@ -3398,8 +3404,8 @@ shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
             shsl_ref res = shsl_call_user_fn(fn, args);
 
             res.ptr->ref_count++;
-            shsl_ref_del(fn);
-            shsl_ref_del(args);
+            shsl_ref_drop(fn);
+            shsl_ref_drop(args);
             res.ptr->ref_count--;
             return res;
         }
@@ -3501,8 +3507,8 @@ shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
                                           expr->let_expr.body_length,
                                           inner_env);
         res.ptr->ref_count++;
-        shsl_ref_del(vals);
-        shsl_ref_del(inner_env);
+        shsl_ref_drop(vals);
+        shsl_ref_drop(inner_env);
         res.ptr->ref_count--;
         return res;
     }
@@ -3921,9 +3927,44 @@ shsl_defun(shsl_builtin_mapset, "map-set!", args, env, {
         return shsl_fn_arg(0);
     })
 
+/// COLLECTION CONVERSION FUNCTIONS DEFINITIONS
+shsl_defun(shsl_builtin_vec_to_list, "vec->list", args, env, {
+        (void)env;
+        shsl_fn_assert_argslen(== 1);
+        shsl_fn_assert_argtype(0, SHSL_VEC);
+
+        shsl_cb cb = shsl_cb_make(SHSL_CB_LIST);
+        shsl_vec_foreach(i, elt, shsl_fn_arg(0))
+            shsl_cb_add(&cb, elt);
+        return shsl_cb_get(cb);
+    })
+shsl_defun(shsl_builtin_list_to_vec, "list->vec", args, env, {
+        (void)env;
+        shsl_fn_assert_argslen(== 1);
+        shsl_fn_assert_argtype_either(0, SHSL_CONS, SHSL_NIL);
+
+        shsl_cb cb = shsl_cb_make(SHSL_CB_VEC);
+        for(shsl_ref i = shsl_fn_arg(0); shsl_is_cons(i); i = shsl_cdr(i))
+            shsl_cb_add(&cb, shsl_car(i));
+        return shsl_cb_get(cb);
+    })
+/// COLLECTION GENERATION VARIADIC FUNCTIONS DEFINITIONS
+// note for these two functions
+// functions already receive arguments as a parameter vector
+shsl_defun(shsl_builtin_vec, "vec", args, env, {
+        (void)env;
+        return args;
+    })
+shsl_defun(shsl_builtin_list, "list", args, env, {
+        (void)env;
+        shsl_cb cb = shsl_cb_make(SHSL_CB_LIST);
+        shsl_vec_foreach(i, elt, shsl_fn_arg(0))
+            shsl_cb_add(&cb, elt);
+        return shsl_cb_get(cb);
+    })
+
 /// GENERIC COLLECTION FUNCTION DEFINITIONS
 // (these are closer in api to what they actually have in clojure)
-
 // (contains? c k) = can you index into collection c with key k?
 // works for both (has key?) vectors (has index?)
 shsl_defun(shsl_builtin_contains, "contains?", args, env, {
@@ -3975,9 +4016,44 @@ shsl_defun(shsl_builtin_count, "count", args, env, {
         }
         return shsl_mkerr(shsl_ref_to_nil(), "unreachable");
     })
+
+// could have been done in a more stdlib fashion
+// but I'll wait for multimethods for that
 shsl_defun(shsl_builtin_get, "get", args, env, {
         (void)env;
-        return shsl_ref_to_nil();
+        shsl_fn_assert_argslen(>= 2);
+        shsl_fn_assert_argslen(<= 3);
+        shsl_fn_assert_argtype_either(0, SHSL_VEC, SHSL_MAP);
+
+        shsl_ref col = shsl_fn_arg(0);
+        shsl_ref ind = shsl_fn_arg(1);
+        shsl_ref def = shsl_vec_length(args)==3
+            ?shsl_vec_get(args, 2)
+            :shsl_ref_to_nil();
+        if(shsl_type(col) == SHSL_VEC) {
+            if(shsl_type(ind) != SHSL_INT)
+                return shsl_mkerr
+                    (ind, "cannot index into vector with non integer index!");
+            ssize_t is = shsl_int(ind);
+            if(is<0)
+                return shsl_mkerr
+                    (ind, "cannot index into vector with negative index!");
+            size_t i = (size_t)is;
+            if(i>=shsl_vec_length(col))
+                return shsl_mkerr
+                    (ind, "index out of bounds, tried accessing element at "
+                     "index %zu in an array of length %zu!",
+                     i, shsl_vec_length(col));
+            return shsl_vec_get(shsl_fn_arg(0), i);
+        }
+        if(shsl_type(col) == SHSL_MAP) {
+            ssize_t i = shsl_map_index(col, ind);
+            if(i<0)
+                return def;
+            return col.ptr->map.buf[i].v;
+        }
+        return shsl_mkerr
+            (shsl_ref_to_nil(), "this bit was supposed to be unreachable");
     })
 
 /// SHSL BUILTIN OTHER FUNCTIONS DEFINITIONS
@@ -4139,6 +4215,7 @@ shsl_defun(shsl_builtin_exit, "exit", args, env, {
         return shsl_mkerr(shsl_ref_to_nil(), "unreachable");
     })
 
+// miscellaneous functions
 // load file
 shsl_defun(shsl_builtin_load, "load", args, env, {
         shsl_fn_assert_argslen(==1);
@@ -4146,6 +4223,43 @@ shsl_defun(shsl_builtin_load, "load", args, env, {
         const char* filepath = shsl_fn_arg(0).ptr->str;
 
         return shsl_eval_file(filepath, env);
+    })
+// generate unique symbol, (for macros)
+// TODO: currently hardcoded max number of tries at 9999
+// this is already overkill, but I'd like it to be like, mildly parameterized
+shsl_defun(shsl_builtin_gensym, "gensym", args, env, {
+        char* base;
+        if(shsl_fn_argslen() == 0)
+            base = "gensym-";
+        else if (shsl_fn_argslen() == 1) {
+            shsl_ref gsname = shsl_fn_arg(0);
+            if(shsl_type(gsname) != SHSL_STR)
+                return shsl_mkerr
+                    (gsname, "when given one argument gensym expects "
+                     "the first argument to be of type string");
+            // shsl_cat_strs heap allocates, remember this fact
+            // for when we get to the teardown of this functions
+            base = shsl_cat_strs("gensym-", gsname.ptr->str, "-");
+        }
+        else
+            return shsl_mkerr
+                (args,
+                 "gensym expects 0 or 1 arguments, it cannot take "
+                 "%zu items", (size_t)shsl_fn_argslen());
+        
+        const size_t base_len = strlen(base);
+        const char* numstr = "----";
+        char* symname = shsl_cat_strs(base, numstr);
+        shsl_ref sym = shsl_mksym_nocopy(symname);
+        for(size_t try = 0; try<10000; try++) {
+            sprintf(symname+base_len, "%zu", try);
+            if(!shsl_env_has(env, sym)) {
+                if(shsl_fn_argslen() == 1) free(base);
+                return sym;
+            }
+        }
+        if(shsl_fn_argslen() == 1) free(base);
+        return shsl_mkerr(sym, "could not generate symbol, ran out of tries");
     })
 
 // environment creation
@@ -4193,16 +4307,9 @@ shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
     shsl_env_def(env, shsl_mksym("<="),
                  shsl_mkbuiltin_fn(env, shsl_builtin_le));
 
-    // logical functions
-    // (FIXME: very temporary, these should be macros to allow for short circuiting)
-    shsl_env_def(env, shsl_mksym("and"),
-                 shsl_mkbuiltin_fn(env, shsl_builtin_and));
-    shsl_env_def(env, shsl_mksym("or"),
-                 shsl_mkbuiltin_fn(env, shsl_builtin_or));
-    shsl_env_def(env, shsl_mksym("macroexpand-1"),
-                 shsl_mkbuiltin_fn(env, shsl_builtin_macroexpand_1));
-
     // data predicates
+    shsl_env_def(env, shsl_mksym("null?"),
+                 shsl_mkbuiltin_fn(env, shsl_builtin_isnil));
     shsl_env_def(env, shsl_mksym("nil?"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_isnil));
     shsl_env_def(env, shsl_mksym("int?"),
@@ -4230,7 +4337,7 @@ shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
                  shsl_mkbuiltin_fn(env, shsl_builtin_ismacro));
 
     // list operations
-    // isproper, null
+    // TODO: proper?
     shsl_env_def(env, shsl_mksym("cons"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_cons));
     shsl_env_def(env, shsl_mksym("car"),
@@ -4241,6 +4348,8 @@ shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
                  shsl_mkbuiltin_fn(env, shsl_builtin_nth));
     shsl_env_def(env, shsl_mksym("nthcdr"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_nthcdr));
+    shsl_env_def(env, shsl_mksym("list"),
+                 shsl_mkbuiltin_fn(env, shsl_builtin_list));
 
     // vector operations
     shsl_env_def(env, shsl_mksym("vec-get"),
@@ -4253,6 +4362,8 @@ shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
                  shsl_mkbuiltin_fn(env, shsl_builtin_vecpush));
     shsl_env_def(env, shsl_mksym("vec-cat"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_veccat));
+    shsl_env_def(env, shsl_mksym("vec"),
+                 shsl_mkbuiltin_fn(env, shsl_builtin_vec));
 
     // map operations
     shsl_env_def(env, shsl_mksym("map-get"),
@@ -4273,11 +4384,17 @@ shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
                  shsl_mkbuiltin_fn(env, shsl_builtin_contains));
     // TODO: also map, filter, reduce
 
+    // collection conversion operations
+    shsl_env_def(env, shsl_mksym("vec->list"),
+                 shsl_mkbuiltin_fn(env, shsl_builtin_vec_to_list));
+    shsl_env_def(env, shsl_mksym("list->vec"),
+                 shsl_mkbuiltin_fn(env, shsl_builtin_vec_to_list));
+
     // error functions
     shsl_env_def(env, shsl_mksym("err"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_err));
 
-    // other functions
+    // miscellaneous functions
     shsl_env_def(env, shsl_mksym("="),
                  shsl_mkbuiltin_fn(env, shsl_builtin_equal));
     shsl_env_def(env, shsl_mksym("!="),
@@ -4290,8 +4407,20 @@ shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
                  shsl_mkbuiltin_fn(env, shsl_builtin_print));
     shsl_env_def(env, shsl_mksym("println"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_println));
+    // macro oriented functions
+    shsl_env_def(env, shsl_mksym("and"),
+                 shsl_mkbuiltin_fn(env, shsl_builtin_and));
+    shsl_env_def(env, shsl_mksym("or"),
+                 shsl_mkbuiltin_fn(env, shsl_builtin_or));
+    shsl_env_def(env, shsl_mksym("gensym"),
+                 shsl_mkbuiltin_fn(env, shsl_builtin_gensym));
+    shsl_env_def(env, shsl_mksym("macroexpand-1"),
+                 shsl_mkbuiltin_fn(env, shsl_builtin_macroexpand_1));
+    // introspection functions
+    shsl_env_def(env, shsl_mksym("fnenv"),
+                 shsl_mkbuiltin_fn(env, shsl_builtin_fnenv));
 
-    // system functions
+    // systemy functions
     shsl_env_def(env, shsl_mksym("exec"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_exec));
     shsl_env_def(env, shsl_mksym("exec-vec"),
@@ -4299,15 +4428,25 @@ shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
     shsl_env_def(env, shsl_mksym("exit"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_exit));
 
-    // introspection functions
-    shsl_env_def(env, shsl_mksym("fnenv"),
-                 shsl_mkbuiltin_fn(env, shsl_builtin_fnenv));
-
     // TODO: ctypes equivalent
     return env;
 }
 
-shsl_ref shsl_env_make_initial(void) {
+
+shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
+    // shsl is self contained in one big c file so...
+    // we don't put the standard library in a separate file either
+    // if opengl tutorials can do this then by golly so can we
+
+    // TODO: add this fabled standard library
+    static const char* stdlib =
+        "";
+    (void)stdlib;
+    (void)env;
+    return shsl_mkerr(shsl_ref_to_nil(), "todo");
+}
+
+shsl_ref shsl_env_mkinitial(void) {
     shsl_ref env = shsl_ref_add(shsl_env_mkempty());
     shsl_env_add_initial_definitions(env);
     return env;
@@ -4535,7 +4674,7 @@ shsl_ref shsl_eval_str(char* c, shsl_ref env) {
         // do macro expansion during form "compilation"?
         shsl_ref_add(p.ref);
         shsl_expr* expr = shsl_form_to_expr(p.ref, env);
-        shsl_ref_del(p.ref);
+        shsl_ref_drop(p.ref);
 
         shsl_ref_set(&curr, shsl_eval(expr, env));
         shsl_expr_free(expr);
@@ -4543,7 +4682,7 @@ shsl_ref shsl_eval_str(char* c, shsl_ref env) {
 
     // setting curr to the result of eval creates an artificial reference to it
     // which can cause leakage
-    // but we can't use shsl_ref_del() on curr because this may be the only ref
+    // but we can't use shsl_ref_drop() on curr because this may be the only ref
     // pointing to the result of eval
     // fresh values out of eval are valid references with a ref count of 0
     if(!shsl_is_nil(curr))curr.ptr->ref_count--;
@@ -4663,7 +4802,7 @@ void shsl_die(int exit_with, const char* errmsg, ...) {
 }
 int shsl_main(int argc, char** argv) {
     // init
-    shsl_ref env = shsl_env_make_initial();
+    shsl_ref env = shsl_env_mkinitial();
     shsl_env_def(env, shsl_mksym("progname"), shsl_mkstr(argv[0]));
 
     // no args, default behaviour just start a repl
@@ -4680,7 +4819,7 @@ int shsl_main(int argc, char** argv) {
             shsl_vec_push(shsl_argv, shsl_mkstr(argv[i]));
         }
         shsl_env_def(env, shsl_mksym("argv"), shsl_argv);
-        shsl_ref_del(shsl_ref_add(shsl_eval_file(argv[1], env)));
+        shsl_ref_drop(shsl_ref_add(shsl_eval_file(argv[1], env)));
         goto teardown;
     }
 
@@ -4696,7 +4835,7 @@ int shsl_main(int argc, char** argv) {
             shsl_ref ref = shsl_eval_str(line, env);
             shsl_ref_add(ref);
             shsl_fprint(ref, stdout);
-            shsl_ref_del(ref);
+            shsl_ref_drop(ref);
             puts("");
             i+=2;
         }
@@ -4704,7 +4843,7 @@ int shsl_main(int argc, char** argv) {
             if(i+1 >= argc)
                 shsl_die(1, "-f flag specified without any file name after the flag!");
             char* filename = argv[i+1];
-            shsl_ref_del(shsl_ref_add(shsl_eval_file(filename, env)));
+            shsl_ref_drop(shsl_ref_add(shsl_eval_file(filename, env)));
             i+=2;
         }
         else if(strcmp(argv[i], "-r") == 0) {
@@ -4722,7 +4861,7 @@ int shsl_main(int argc, char** argv) {
         }
     }
  teardown:
-    shsl_ref_del(env);
+    shsl_ref_drop(env);
     return 0;
 }
 

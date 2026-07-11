@@ -13,7 +13,7 @@
   [cc]
   common-cflags
   ["-DSHSL_LOG_ERROR" "-DSHSL_LOG_ERROR_EXPR"]
-  ["-DSHSL_LOG_TESTS"]
+  ; ["-DSHSL_LOG_TESTS"]
   ["-o" "tests" "tests.c"]))
 (println "\\end{compiling library tests}")
 (println "")

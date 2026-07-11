@@ -1,0 +1,20 @@
+;; -*- mode:clojure -*-
+;; todo: vectors as sequences
+;; first rest
+;; slices?
+
+(def defn (macro [name args & body]
+                 (cons 'def
+                       (const name
+                              (list (cons 'fn
+                                          (cons args (vec->list body))))))))
+(def defmacro (macro [name args & body]
+                     (cons 'def
+                           (const name
+                                  (list (cons 'macro
+                                              (cons args (vec->list body))))))))
+(defmacro and [& args]
+  )
+
+(defmacro or [& args]
+  )
