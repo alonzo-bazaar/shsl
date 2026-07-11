@@ -1,139 +1,43 @@
 #!./shsl
 ;; -*- mode:clojurescript -*-
 ;; vi: set ft=clojure:
+(def exec-or-die
+  (fn [name cmd]
+    (println (str "now at step: " name "..."))
+    (set status (exec-vec cmd))
+    (println (str "finished step: " name "\n"))
+    (if (not status)
+      (do
+        (println "step exited with failure, exiting build script")
+        (exit 1)))))
 
-;; currently assuming we're on linux, script shall be made platform
-;; agnostic when we have the tools to make it platform agnostic
-
-;; functions to be dodne to make this work
-;; contains?
-;; vec tail (subvec)
-;; string pad (left and right, I presume)
-;; string concatenation (left and right, I presume)
-
-;; might implement string stripping too for shit and giggles
-;; to string (just called str in clojure)
-;; exit (pass it an exit code)
-;; vector concatenation
-;; string ref
-;; string literals
-
-;; string/array/vel al length (count)
-;; split string by delimiter
-;; split string by delimiterS
-
-;; https://clojuredocs.org/clojure.string/split
-;; clojure's split is by regex but fuck that for now
-;; split shall split by delimiter, not regex as clojure's
-
-;; stringify type for user
-;; stringify type for internal errors reporting
-
-;; and / or
-;; implementing them as functions means we won't have short circuiting
-;; but like, I fucking need em, even if as functions for now
-
-;; note: do I wanna expose stdout and stderr as different variables?
-;; print to stream, perhaps
-
-;; loading files, perhaps
-;; I have a vague feeling most of the shit here would be better off in a
-;; separate command line parsing/general utility library then here
-;; mainly index-of, index-if, param-value
-(load "argparse.shsl")
-
-(def usage
-  (fn []
-    (print "usage:" progname "[subcommand]" "[flags]")
-    (print "accepted subcommands are:")
-    (print "  [no subcommand]: defaults to all")
-    (print "  build: build targets")
-    (print "  test: run tests")
-    (print "  all: build targets then run tests")
-    (print "")
-
-    (print "flags accepted by all subcommands are:")
-    (print "  -h    :"
-           "print this help message and exit")
-    (print "  --help:"
-           "same thing but takes more characters to type")
-    (print "")
-
-    (print "accepted flags for build subcommand are:")
-    (print "  --cc=[c compiler]")
-    (print "    specifies which c compiler to use for build")
-    (print "    supported compilers so far are")
-    (print "    * gcc")
-    (print "    * g++")
-    (print "    * clang")
-    (print "    * clang++")
-    (print "    * mingw-gcc (gets turned into x86_64-w64-mingw-gcc)")
-    (print "    * mingw-g++ (gets turned into x86_64-w64-mingw-g++)")
-    (print "  -l [comma separated list of definitions]:")
-    (print "  or")
-    (print "  --log=[comma separated list of definitions]:")
-    (print "  where list can contain any of the following") 
-    (print "    * err")
-    (print "    * errexpr")
-    (print "    * mem")
-    (print "    * gc")
-    (print "    * delref")
-    (print "  preprocessor directives will then be added to log")
-    (print "  when any of the requested events happen within shsl")
-    (print "")
-
-    (print "accepted flags for test subcommand are:")
-    (print "  -l [comma separated list of definitions]:")
-    (print "  or")
-    (print "  --log=[comma separated list of definitions]:")
-    (print "  where list can contain any of the following:") 
-    (print "    * test")
-    (print "  preprocessor directives will then be added to log")
-    (print "  when any of the requested events happen within shsl")))
-
-;; build up compilation commands
-;; get cc
-(def compiler-shorthands
-  {
-   "mingw-gcc" "x86_64-w64-mingw-gcc"
-   "mingw-g++" "x86_64-w64-mingw-g++"
-   })
-(def compiler-default "gcc")
-(def cc (let [cc-param (param "--cc")]
-          (if (null? cc-param) ;; param not found
-            compiler-default
-              (if (contains? compiler-shorthands cc-param)
-                (get compiler-shorthands cc-param)
-                cc-param))))
-
-;; build up compiler flags
-(def common-cflags ["-Wall" "-Wextra" "-Wpedantic"
-                    "-Wswitch" "-Wno-parentheses"
+(def cc "gcc")
+(def common-cflags ["-Wall" "-Wextra" "-Wpedantic" "-Wswitch" "-Wno-parentheses"
                     "-Werror"
                     "-O0" "-g3" "-ggdb"])
 
-(def logging-shorthands
-  {
-   ;; preprocessor definitions flags for library and interpreter
-   "err" "-DSHSL_LOG_ERROR"
-   "errexpr" "-DSHSL_LOG_ERROR_EXPR"
-   "mem" "-DSHSL_LOG_ERROR_EXPR"
-   "gc" "-DSHSL_LOG_GC"
-   "delref" "-DSHSL_LOG_DEL_REF"
+(exec-or-die "compiling shsl executable"
+             (vec-cat
+              [cc]
+              common-cflags
+              ["-DSHSL_LOG_ERROR" "-DSHSL_LOG_ERROR_EXPR"]
+              ["-o" "shsl" "shsl.c"]))
 
-   ;; preprocessor definitions flags for library C tests
-   "test" "-DSHSL_LOG_TESTS"
-   })
+(exec-or-die "running self tests"
+             ["./selftest.shsl"])
 
-(def get-defs
-  (fn [args]
+(exec-or-die "running shell tests"
+             ["./test.sh"])
 
-(def shsl-flags (cat
-                 common-cflags
-                 ["-o" "shsl" "shsl.c"])
+(exec-or-die "compiling library tests"
+             (vec-cat
+              [cc]
+              common-cflags
+              ["-DSHSL_LOG_ERROR" "-DSHSL_LOG_ERROR_EXPR"]
+                                        ; ["-DSHSL_LOG_TESTS"]
+              ["-o" "tests" "tests.c"]))
 
-(def test-defs (cat
-                (if (arg? "--d-logtest") ["-DSHSL_LOG_TESTS"] []))
+(exec-or-die "running library tests"
+             ["./tests"])
 
-(def test-flags)
-
+(println "if nothing above aborted all tests pass!")

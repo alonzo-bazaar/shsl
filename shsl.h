@@ -87,15 +87,41 @@ char* shsl_append_chars_n(const char* s, size_t n, ...);
 #define shsl_cat_strs(...)                                      \
     shsl_cat_strs_n(SHSL_ARG_COUNT(__VA_ARGS__), __VA_ARGS__)
 // append a bunch characters at the end of a string
-#define shsl_append_chars(first, ...)                                      \
+#define shsl_append_chars(first, ...)                                   \
     shsl_append_chars_n(first, SHSL_ARG_COUNT(__VA_ARGS__), __VA_ARGS__)
 bool is_escape_char(const char c);
 bool does_char_escape(const char c);
 char escape_to_escaped(const char c);
 
+// more or less
+// https://doc.rust-lang.org/std/primitive.never.html 
+// born to typecheck, live to crash and die
+#define shsl_dec_errtype_fn(type, name)                 \
+    type shsl_err_ ## name ## _fn                       \
+    (const char* errmsg, size_t line, const char* file)
+
+#define shsl_def_errtype_fn(type, name)                         \
+    type shsl_err_ ## name ## _fn                               \
+    (const char* errmsg, size_t line, const char* file) {       \
+        fprintf(stderr, "some shit failed!\n%s\n", errmsg);     \
+        fprintf(stderr, "at line %zu in file %s", line, file);  \
+        exit(1);                                                \
+    }
+
+shsl_dec_errtype_fn(int, int);
+shsl_dec_errtype_fn(size_t, size_t);
+shsl_dec_errtype_fn(ssize_t, ssize_t);
+shsl_dec_errtype_fn(const char*, const_str);
+shsl_dec_errtype_fn(char*, str);
+
+#define shsl_err_int(msg) shsl_err_int_fn(msg, __LINE__, __FILE__)
+#define shsl_err_size_t(msg) shsl_err_size_t_fn(msg, __LINE__, __FILE__)
+#define shsl_err_const_str(msg) shsl_err_const_str_fn(msg, __LINE__, __FILE__)
+#define shsl_err_str(msg) shsl_err_str_fn(msg, __LINE__, __FILE__)
+
+
 //// SHSL DATA DECLARATIONS
 //// ----------------------------------------------------------------------------
-
 /// DATA TYPES DECLARATIONS
 // type tag for shsl objects
 typedef enum SHSL_OBJ_TYPE {
@@ -265,10 +291,13 @@ shsl_ref shsl_vec_slice(shsl_ref vec_obj, size_t first, size_t last);
 // although it does introduce a bit of overhead, sorry :|
 // (it should be easy enough for the compiler to remove the extra overhead)
 // it's here and not in the implementation as this is part of shsl's api
-#define shsl_vec_foreach(i, elt, vec)			\
-    for(size_t i = 0; i<shsl_vec_length(vec); ++i)	\
-	for(shsl_ref elt = shsl_vec_get(vec, i);	\
-	    elt.ptr; elt.ptr = NULL)                    \
+// not the way to place to put an assert in but hey, if it works it works
+#define shsl_vec_foreach(i, elt, vec_ref)                               \
+    for(size_t i = shsl_is_vec(vec_ref)?0:shsl_err_size_t               \
+            ("can't call shsl_vec_foreach on non vector datum!");       \
+        i<vec_ref.ptr->vec.size; ++i)                                   \
+	for(shsl_ref elt = shsl_vec_get(vec_ref, i);                    \
+	    elt.ptr; elt.ptr = NULL)                                    \
 
 /// MAP MANIPULATIONS DECLARATIONS
 void shsl_map_expand(shsl_ref map_obj, size_t new_size);
@@ -707,6 +736,12 @@ char* shsl_append_chars_n(const char* s, size_t n, ...) {
     return shsl_sb_get(&sb);
 }
 
+shsl_def_errtype_fn(int, int)
+shsl_def_errtype_fn(size_t, size_t)
+shsl_def_errtype_fn(ssize_t, ssize_t)
+shsl_def_errtype_fn(const char*, const_str)
+shsl_def_errtype_fn(char*, str)
+
 //// SHSL DATA DEFINITIONS
 //// ----------------------------------------------------------------------------
 
@@ -915,8 +950,11 @@ bool shsl_is_num(const shsl_ref ref) {
 bool shsl_is_err(const shsl_ref ref) {
     return shsl_type(ref) == SHSL_ERR;
 }
+bool shsl_is_falsey(const shsl_ref ref) {
+    return (shsl_is_nil(ref) || shsl_is_err(ref));
+}
 bool shsl_is_truthy(const shsl_ref ref) {
-    return !(shsl_is_nil(ref) || shsl_is_err(ref));
+    return !shsl_is_falsey(ref);
 }
 
 bool shsl_is_cons(const shsl_ref ref) {
@@ -1024,7 +1062,7 @@ shsl_ref shsl_vmkerr(shsl_ref data, const char* msg, va_list args) {
 
 #ifdef SHSL_LOG_ERROR
     fprintf(stderr, "[ERROR] %s\n", buf);
-    fprintf(stderr, "[ERROR] with data:");
+    fprintf(stderr, "[ERROR] with data: ");
     shsl_fpr(data, stderr);
     fputc('\n', stderr);
 #endif
@@ -3207,7 +3245,8 @@ shsl_ref shsl_ll_env_mkframe(shsl_lambda_list* ll, shsl_ref vals) {
         shsl_ref pvals = shsl_ref_add(shsl_vec_slice(vals, 0, n_positional));
         // variadic sym and variadic vals (vector)
         shsl_ref vsym = ll->variadic;
-        shsl_ref vvals = shsl_vec_slice(vals, n_positional, n_variadic);
+        shsl_ref vvals = shsl_vec_slice(vals, n_positional,
+                                        n_positional + n_variadic);
 
         shsl_ref frame = shsl_env_mkframe(psyms, pvals);
         shsl_ref_drop(psyms);
@@ -3285,7 +3324,12 @@ shsl_ref shsl_call_builtin_fn(shsl_ref fn, shsl_ref args) {
     assert(shsl_type(fn) == SHSL_BUILTIN_FN ||
            shsl_type(fn) == SHSL_BUILTIN_MACRO);
     assert(shsl_type(args) == SHSL_VEC);
-    return fn.ptr->builtin_fn.apply (args, fn.ptr->builtin_fn.env);
+
+    shsl_builtin_fn inner_fn = (shsl_type(fn) == SHSL_BUILTIN_FN)
+        ?fn.ptr->builtin_fn
+        :fn.ptr->builtin_macro;
+
+    return inner_fn.apply (args, inner_fn.env);
 }
 
 shsl_ref shsl_call_user_fn(shsl_ref fn, shsl_ref args) {
@@ -3293,12 +3337,15 @@ shsl_ref shsl_call_user_fn(shsl_ref fn, shsl_ref args) {
            shsl_type(fn) == SHSL_USER_MACRO);
     assert(shsl_type(args) == SHSL_VEC);
 
+    shsl_lambda_list* ll = (shsl_type(fn) == SHSL_USER_FN)
+        ?fn.ptr->user_fn.lambda_list
+        :fn.ptr->user_macro.lambda_list;
+
     size_t len = fn.ptr->user_fn.body_length;
     if(len == 0)
         return shsl_ref_to_nil();
 
-    shsl_ref inner_frame = shsl_ll_env_mkframe(fn.ptr->user_fn.lambda_list,
-                                               args);
+    shsl_ref inner_frame = shsl_ll_env_mkframe(ll, args);
     if(shsl_is_err(inner_frame)) {
         return shsl_mkerr
             (inner_frame,
@@ -3413,12 +3460,12 @@ shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
             shsl_free(args);
             return shsl_mkerr
                 (fn, "macro call should have been handled at macro expand time, "
-                "it is an error to call a macro at eval time"); 
+                 "it is an error to call a macro at eval time"); 
         case SHSL_USER_MACRO:
             shsl_free(args);
             return shsl_mkerr
                 (fn, "macro call should have been handled at macro expand time, "
-                "it is an error to call a macro at eval time"); 
+                 "it is an error to call a macro at eval time"); 
             // TODO: case SHSL_SYM:
             // if argument is a map and symbol is a keyword then do the keyword
             // thing
@@ -3763,6 +3810,11 @@ shsl_defun(shsl_builtin_ismacro, "macro?", args, env, {
         shsl_fn_assert_argslen(== 1);
         return shsl_bool_to_obj(shsl_is_macro(shsl_fn_arg(0)));
     })
+shsl_defun(shsl_builtin_not, "not", args, env, {
+        (void)env;
+        shsl_fn_assert_argslen(== 1);
+        return shsl_bool_to_obj(shsl_is_falsey(shsl_fn_arg(0)));
+    })
 
 shsl_defun(shsl_builtin_err, "err", args, env, {
         (void)env;
@@ -3907,6 +3959,34 @@ shsl_defun(shsl_builtin_veccat, "vec-cat", args, env, {
         }
         return res;
     })
+shsl_defun(shsl_builtin_vecslice, "vec-slice", args, env, {
+        (void)env;
+        shsl_fn_assert_argslen(>= 2);
+        shsl_fn_assert_argslen(<= 3);
+        shsl_fn_assert_argtype(0, SHSL_VEC);
+        shsl_fn_assert_argtype(1, SHSL_INT);
+        if(shsl_fn_argslen() == 3)
+            shsl_fn_assert_argtype(2, SHSL_INT);
+
+        shsl_ref v = shsl_fn_arg(0);
+        ssize_t start_s = shsl_int(shsl_fn_arg(1));
+        ssize_t end_s = shsl_fn_argslen()==3
+            ?shsl_int(shsl_fn_arg(2))
+            :(ssize_t)shsl_vec_length(v);
+
+        if(start_s < 0)
+            return shsl_mkerr
+                (shsl_fn_arg(1),
+                 "cannot slice into vector with negative start index");
+        if(shsl_fn_argslen()==3 && end_s < 0)
+            return shsl_mkerr
+                (shsl_fn_arg(2),
+                 "cannot slice into vector with negative end index!");
+
+        size_t start = (size_t)start_s;
+        size_t end = (size_t)end_s;
+        return shsl_vec_slice(v, start, end);
+    })
 
 /// BUILTIN MAP FUNCTIONS DEFINITIONS
 shsl_defun(shsl_builtin_mapget, "map-get", args, env, {
@@ -3958,8 +4038,8 @@ shsl_defun(shsl_builtin_vec, "vec", args, env, {
 shsl_defun(shsl_builtin_list, "list", args, env, {
         (void)env;
         shsl_cb cb = shsl_cb_make(SHSL_CB_LIST);
-        shsl_vec_foreach(i, elt, shsl_fn_arg(0))
-            shsl_cb_add(&cb, elt);
+        shsl_vec_foreach(i, arg, args)
+            shsl_cb_add(&cb, arg);
         return shsl_cb_get(cb);
     })
 
@@ -4160,26 +4240,27 @@ shsl_defun(shsl_builtin_exec, "exec", args, env, {
         shsl_fn_assert_argslen(>= 1);
         return shsl_exec(args);
     })
-    shsl_defun(shsl_builtin_exec_vec, "exec-vec", args, env, {
-            // TODO: guess who ain't supporting windows rn :|
-            (void)env;
-            shsl_fn_assert_argslen(== 1);
-            shsl_fn_assert_argtype(0, SHSL_VEC);
-            return shsl_exec(shsl_fn_arg(0));
-        })
+
+shsl_defun(shsl_builtin_exec_vec, "exec-vec", args, env, {
+        // TODO: guess who ain't supporting windows rn :|
+        (void)env;
+        shsl_fn_assert_argslen(== 1);
+        shsl_fn_assert_argtype(0, SHSL_VEC);
+        return shsl_exec(shsl_fn_arg(0));
+    })
 
 // FIXME: very temporary, these should be macros, functions can't short circuit
-    shsl_defun(shsl_builtin_or, "or", args, env, {
-            (void)env;
-            bool any_true = false;
-            shsl_vec_foreach(i, arg, args)
-                if(shsl_is_truthy(arg)) {
-                    any_true=true;
-                    break;
-                }
+shsl_defun(shsl_builtin_or, "or", args, env, {
+        (void)env;
+        bool any_true = false;
+        shsl_vec_foreach(i, arg, args)
+            if(shsl_is_truthy(arg)) {
+                any_true=true;
+                break;
+            }
 
-            return shsl_bool_to_obj(any_true);
-        })
+        return shsl_bool_to_obj(any_true);
+    })
 
 shsl_defun(shsl_builtin_and, "and", args, env, {
         (void)env;
@@ -4335,6 +4416,8 @@ shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
                  shsl_mkbuiltin_fn(env, shsl_builtin_isfn));
     shsl_env_def(env, shsl_mksym("macro?"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_ismacro));
+    shsl_env_def(env, shsl_mksym("not"),
+                 shsl_mkbuiltin_fn(env, shsl_builtin_not));
 
     // list operations
     // TODO: proper?
