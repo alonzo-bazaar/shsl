@@ -2,19 +2,24 @@
 ;; -*- mode:clojure -*-
 ;; vi: set ft=clojure:
 
-(def defn (macro [name args & body]
-                 (cons 'def
-                       (cons name
-                             (list (cons 'fn
-                                         (cons args (vec->list body))))))))
+;; so uh... I don't have quasi quoting :|
+;; yet
+(def defmacro
+  (macro [name args & body]
+         (cons 'def
+               (cons name
+                     (list
+                      (cons 'macro
+                            (cons args
+                                  (vec->list body))))))))
 
-(defn hello [name] (println "hello there" name))
-(exit 1)
-(def defmacro (macro [name args & body]
-                     (cons 'def
-                           (cons name
-                                 (list (cons 'macro
-                                             (cons args (vec->list body))))))))
+(defmacro defn [name args & body]
+  (cons 'def
+        (cons name
+              (list
+               (cons 'fn
+                     (cons args
+                           (vec->list body)))))))
 
 ;; TODO: the current implementation of gensym is kinda ass
 ;; because we don't intern symbols so our uniqueness check is only
@@ -42,7 +47,7 @@
 (defmacro or [& args]
   (or-gen args))
 
-(defn or-gen [args]
+(defn and-gen [args]
   (if (= 0 (vec-len args))
     nil
     (if (= 1 (vec-len args))
@@ -53,7 +58,10 @@
         (list
          'let (vec first-sym first)
          (list 'if (list 'not first-sym) first-sym
-               (or-gen rest)))))))
+               (and-gen rest)))))))
 
 (defmacro and [& args]
   (and-gen args))
+
+(defn str-at [s i]
+  (substr s i (+ i 1)))

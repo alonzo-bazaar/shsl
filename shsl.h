@@ -370,20 +370,20 @@ shsl_token empty_token(enum SHSL_TOKEN_TYPE token_type);
 lexer_pair error_lexer_pair(const char* errmsg);
 
 // is this character special for the lexer?
-bool is_special_char(char c);
+bool is_special_char(const char c);
 // can this a character that be be part of a symbol (or number)
-bool is_symbol_char(char c);
+bool is_symbol_char(const char c);
 // try parsing from c to c+len as an integer and writing that into *into
 // returns true if parsing was succesful, false otherwise
-bool try_parse_integer(char* c, size_t len, long* into);
+bool try_parse_integer(const char* c, size_t len, long* into);
 // copy characters from c to c+len into a fresh null terminated string
 char* slice_to_fresh_str(const char* c, size_t len);
 // parse a non special token (symbol or number) starting at c
-shsl_token parse_non_special_token(char*c, size_t len);
+shsl_token parse_non_special_token(const char*c, size_t len);
 
 // read a token off of string and return the pair of that token plus
 // the string after the token
-lexer_pair token_off(char* str);
+lexer_pair token_off(const char* str);
 
 
 //// PARSER DECLARATIONS
@@ -394,7 +394,7 @@ lexer_pair token_off(char* str);
 defstruct(parser_pair);
 // parse object starting at str and return pair of that object
 // plus the string after that object
-parser_pair parse_off(char* str);
+parser_pair parse_off(const char* str);
 // parse from str until you meet a token of stop type
 // collect the results into a list and return them
 // erros out if it meets a token of type error_on[0]...error_on[error_on_len] before
@@ -403,7 +403,7 @@ parser_pair parse_off(char* str);
 // said less abstractly
 // if you meet a '(' you parse until ')' and error out if you meet a ']' or '}'
 // at the same depth before you meet a ')' at the same depth
-parser_pair parse_until(char* str,
+parser_pair parse_until(const char* str,
 			shsl_cb cb,
 			enum SHSL_TOKEN_TYPE stop,
 			enum SHSL_TOKEN_TYPE* error_on, size_t error_on_length);
@@ -594,7 +594,7 @@ void shsl_fprint(const shsl_ref obj, FILE* stream);
 /// SHSL SUBROUTINES FOR MAIN DECLARATIONS
 // (they are, of course, also useable standalone and are often "pure" enough
 //  that it makes sense to use em as such)
-shsl_ref shsl_eval_str(char* c, shsl_ref env);
+shsl_ref shsl_eval_str(const char* c, shsl_ref env);
 char* shsl_read_file(const char *path);
 shsl_ref shsl_eval_file(const char* filepath, shsl_ref env);
 void shsl_repl(shsl_ref env);
@@ -602,7 +602,7 @@ void shsl_repl(shsl_ref env);
 /// SHSL MAIN DECLARATIONS
 void shsl_usage(const char* name, bool print_extra, FILE* stream);
 void shsl_die(int exit_with, const char* errmsg, ...);
-int shsl_main(int argc, char** argv);
+int shsl_main(shsl_ref env, const char* program_name, int argc, char** argv);
 
 #endif // SHSL_H
 
@@ -1447,8 +1447,9 @@ shsl_ref shsl_vec_slice(shsl_ref vec_obj, size_t first, size_t last) {
     
     size_t slice_size = last-first;
     shsl_ref slice = shsl_mkvec(slice_size);
-    for(size_t i = 0; i<slice_size; ++i)
-        slice.ptr->vec.buf[i] = shsl_ref_add(shsl_vec_get(vec_obj, i));
+    for(size_t i = first; i<last; ++i)
+        shsl_vec_push(slice, shsl_vec_get(vec_obj, i));
+    slice.ptr->vec.size = slice_size;
     return slice;
 }
 
@@ -1712,7 +1713,7 @@ typedef struct shsl_token {
 // but to the some shsl_lexer_initial_state(filename, str); for instance
 typedef struct lexer_pair {
     shsl_token token;
-    char* remaining;
+    const char* remaining;
 } lexer_pair;
 
 // for a lot of token types (parens, quotes, et al) we only need to know the type
@@ -1738,7 +1739,7 @@ lexer_pair error_lexer_pair(const char* errmsg) {
 
 // special characters are chars that once encountered you go like
 // "ok, I'm done with the current thing, this character starts the next thing"
-bool is_special_char(char c) {
+bool is_special_char(const char c) {
     const char special[] = {'(', ')',
 			    '[', ']',
 			    '{', '}',
@@ -1748,13 +1749,13 @@ bool is_special_char(char c) {
     return *s!='\0';
 }
 // character that can be part of a symbol (or number)
-bool is_symbol_char(char c) {
+bool is_symbol_char(const char c) {
     return isprint(c) && (!isspace(c)) && (!is_special_char(c));
 }
 // try parsing from c to c+len as an integer
 // if success, return true and write the result into the *into pointer
 // if failure (it wasn't an integer), return false and leave *into unaltered
-bool try_parse_integer(char* c, size_t len, long* into) {
+bool try_parse_integer(const char* c, size_t len, long* into) {
     long acc = 0;
     bool neg = false;
     if(len == 1 && (*c == '-' || *c == '+')) return false;
@@ -1791,7 +1792,7 @@ char* slice_to_fresh_str(const char* c, size_t len) {
 // otherwise same with floats
 // TODO: parsing floats
 // otherwise returns a symbol, if the symbol is nil it returns a nil token
-shsl_token parse_non_special_token(char*c, size_t len) {
+shsl_token parse_non_special_token(const char*c, size_t len) {
     long l;
     if (try_parse_integer(c, len, &l))
 	return (shsl_token) {
@@ -1814,7 +1815,7 @@ shsl_token parse_non_special_token(char*c, size_t len) {
 
 // read a token off of string and return the pair of that token plus
 // the string after the token
-lexer_pair token_off(char* str) {
+lexer_pair token_off(const char* str) {
     // handle null pointer string
     if(!str)
 	return error_lexer_pair("cannot read null pointer to string!");
@@ -1873,7 +1874,7 @@ lexer_pair token_off(char* str) {
 
     case '"': {
         shsl_string_builder sb = {0};
-        char* iter = str+1;
+        const char* iter = str+1;
         while(*iter != '\0' && *iter != '"') {
             if(*iter == '\\') {
                 char escape = *(iter+1);
@@ -1929,7 +1930,7 @@ lexer_pair token_off(char* str) {
 
     // if we got here then it's not a special char
     // it's either a symbol or a number
-    char* c = str;
+    const char* c = str;
     while(is_symbol_char(*c)) c++;
 
     return (lexer_pair){
@@ -1945,9 +1946,9 @@ lexer_pair token_off(char* str) {
 // TODO: update into parser state?
 typedef struct parser_pair {
     shsl_ref ref;
-    char* remaining;
+    const char* remaining;
 } parser_pair;
-parser_pair parse_off(char* str) {
+parser_pair parse_off(const char* str) {
     lexer_pair lp = token_off(str);
     switch(lp.token.type) {
         // handle literals
@@ -2046,7 +2047,7 @@ parser_pair parse_off(char* str) {
     }
     assert(0 && "unreachable");
 }
-parser_pair parse_until(char* str,
+parser_pair parse_until(const char* str,
                         shsl_cb cb,
                         SHSL_TOKEN_TYPE stop,
                         SHSL_TOKEN_TYPE* error_on, size_t error_on_length) {
@@ -3902,6 +3903,68 @@ shsl_defun(shsl_builtin_str, "str", args, env, {
         return shsl_mkstr_nocopy(shsl_sb_get(&sb));
     })
 
+// (substr "string" start) = substring from that point to the end of the string
+// (substr "string" start end) = substring from a to b (b excluded, of course)
+shsl_defun(shsl_builtin_substr, "str-sub", args, env, {
+        (void)env;
+        shsl_fn_assert_argslen(>= 2);
+        shsl_fn_assert_argslen(<= 3);
+        shsl_fn_assert_argtype(0, SHSL_STR);
+        shsl_fn_assert_argtype(1, SHSL_INT);
+        if(shsl_fn_argslen() == 3)
+            shsl_fn_assert_argtype(2, SHSL_INT);
+
+        const char* in_buf = shsl_fn_arg(0).ptr->str;
+        const size_t sl = strlen(in_buf);
+        const ssize_t start_s = shsl_int(shsl_fn_arg(1));
+        const ssize_t end_s = shsl_fn_argslen()==3
+            ?shsl_int(shsl_fn_arg(2))
+            :(ssize_t)sl;
+
+        if(start_s < 0)
+            return shsl_mkerr
+                (shsl_fn_arg(0),
+                 "substr: invalid negative start index %l!",
+                 start_s);
+        if(end_s < 0)
+            return shsl_mkerr
+                (shsl_fn_arg(0),
+                 "substr: invalid negative end index %l!",
+                 end_s);
+        if(start_s > end_s)
+            return shsl_mkerr
+                (shsl_fn_arg(0),
+                 "substr: start index %l is larger than end index %l!",
+                 start_s, end_s);
+
+        const size_t start = (size_t)start_s;
+        const size_t end = (size_t)end_s;
+
+        if(start >= sl)
+            return shsl_mkerr
+                (shsl_fn_arg(0),
+                 "substr: start index %zu out of bounds for string of length %zu!",
+                 start, sl);
+        if(end > sl)
+            return shsl_mkerr
+                (shsl_fn_arg(0),
+                 "substr: end index %zu out of bounds for string of length %zu!",
+                 end, sl);
+
+        size_t res_len = end - start;
+        char* res_buf = (char*)calloc(res_len + 1, sizeof(char));
+        memcpy(res_buf, in_buf+start, res_len);
+        res_buf[res_len] = '\0';
+        return shsl_mkstr_nocopy(res_buf);
+    })
+
+shsl_defun(shsl_builtin_strlen, "str-len", args, env, {
+        (void)env;
+        shsl_fn_assert_argslen(== 1);
+        shsl_fn_assert_argtype(0, SHSL_STR);
+        return shsl_mkint(strlen(shsl_fn_arg(0).ptr->str));
+    })
+
 /// BUILTIN VECTOR FUNCTIONS DEFINITIONS
 shsl_defun(shsl_builtin_vecget, "vec-get", args, env, {
         (void)env;
@@ -4142,11 +4205,6 @@ shsl_defun(shsl_builtin_equal, "=", args, env, {
         shsl_fn_assert_argslen(== 2);
         return shsl_bool_to_obj(shsl_eq(shsl_fn_arg(0), shsl_fn_arg(1)));
     })
-shsl_defun(shsl_builtin_nequal, "!=", args, env, {
-        (void)env;
-        shsl_fn_assert_argslen(== 2);
-        return shsl_bool_to_obj(!shsl_eq(shsl_fn_arg(0), shsl_fn_arg(1)));
-    })
 
 shsl_defun(shsl_builtin_pr, "pr", args, env, {
         (void)env;
@@ -4234,44 +4292,12 @@ shsl_ref shsl_exec(shsl_ref command) {
     }
 }
 
-shsl_defun(shsl_builtin_exec, "exec", args, env, {
-        // TODO: guess who ain't supporting windows rn :|
-        (void)env;
-        shsl_fn_assert_argslen(>= 1);
-        return shsl_exec(args);
-    })
-
 shsl_defun(shsl_builtin_exec_vec, "exec-vec", args, env, {
         // TODO: guess who ain't supporting windows rn :|
         (void)env;
         shsl_fn_assert_argslen(== 1);
         shsl_fn_assert_argtype(0, SHSL_VEC);
         return shsl_exec(shsl_fn_arg(0));
-    })
-
-// FIXME: very temporary, these should be macros, functions can't short circuit
-shsl_defun(shsl_builtin_or, "or", args, env, {
-        (void)env;
-        bool any_true = false;
-        shsl_vec_foreach(i, arg, args)
-            if(shsl_is_truthy(arg)) {
-                any_true=true;
-                break;
-            }
-
-        return shsl_bool_to_obj(any_true);
-    })
-
-shsl_defun(shsl_builtin_and, "and", args, env, {
-        (void)env;
-        bool any_false = false;
-        shsl_vec_foreach(i, arg, args)
-            if(!shsl_is_truthy(arg)) {
-                any_false=true;
-                break;
-            }
-
-        return shsl_bool_to_obj(!any_false);
     })
 
 shsl_defun(shsl_builtin_macroexpand_1, "macroexpand-1", args, env, {
@@ -4420,7 +4446,9 @@ shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
                  shsl_mkbuiltin_fn(env, shsl_builtin_not));
 
     // list operations
-    // TODO: proper?
+    // TODO: proper? (tortoise and hare and shit)
+    shsl_env_def(env, shsl_mksym("list"),
+                 shsl_mkbuiltin_fn(env, shsl_builtin_list));
     shsl_env_def(env, shsl_mksym("cons"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_cons));
     shsl_env_def(env, shsl_mksym("car"),
@@ -4431,10 +4459,10 @@ shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
                  shsl_mkbuiltin_fn(env, shsl_builtin_nth));
     shsl_env_def(env, shsl_mksym("nthcdr"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_nthcdr));
-    shsl_env_def(env, shsl_mksym("list"),
-                 shsl_mkbuiltin_fn(env, shsl_builtin_list));
 
     // vector operations
+    shsl_env_def(env, shsl_mksym("vec"),
+                 shsl_mkbuiltin_fn(env, shsl_builtin_vec));
     shsl_env_def(env, shsl_mksym("vec-get"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_vecget));
     shsl_env_def(env, shsl_mksym("vec-set!"),
@@ -4445,8 +4473,8 @@ shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
                  shsl_mkbuiltin_fn(env, shsl_builtin_vecpush));
     shsl_env_def(env, shsl_mksym("vec-cat"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_veccat));
-    shsl_env_def(env, shsl_mksym("vec"),
-                 shsl_mkbuiltin_fn(env, shsl_builtin_vec));
+    shsl_env_def(env, shsl_mksym("vec-slice"),
+                 shsl_mkbuiltin_fn(env, shsl_builtin_vecslice));
 
     // map operations
     shsl_env_def(env, shsl_mksym("map-get"),
@@ -4457,6 +4485,10 @@ shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
     // string operations(?)
     shsl_env_def(env, shsl_mksym("str"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_str));
+    shsl_env_def(env, shsl_mksym("str-sub"),
+                 shsl_mkbuiltin_fn(env, shsl_builtin_substr));
+    shsl_env_def(env, shsl_mksym("str-len"),
+                 shsl_mkbuiltin_fn(env, shsl_builtin_strlen));
 
     // collection operations
     shsl_env_def(env, shsl_mksym("get"),
@@ -4480,8 +4512,6 @@ shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
     // miscellaneous functions
     shsl_env_def(env, shsl_mksym("="),
                  shsl_mkbuiltin_fn(env, shsl_builtin_equal));
-    shsl_env_def(env, shsl_mksym("!="),
-                 shsl_mkbuiltin_fn(env, shsl_builtin_nequal));
     shsl_env_def(env, shsl_mksym("pr"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_pr));
     shsl_env_def(env, shsl_mksym("prn"),
@@ -4490,22 +4520,18 @@ shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
                  shsl_mkbuiltin_fn(env, shsl_builtin_print));
     shsl_env_def(env, shsl_mksym("println"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_println));
+
     // macro oriented functions
-    shsl_env_def(env, shsl_mksym("and"),
-                 shsl_mkbuiltin_fn(env, shsl_builtin_and));
-    shsl_env_def(env, shsl_mksym("or"),
-                 shsl_mkbuiltin_fn(env, shsl_builtin_or));
     shsl_env_def(env, shsl_mksym("gensym"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_gensym));
     shsl_env_def(env, shsl_mksym("macroexpand-1"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_macroexpand_1));
+
     // introspection functions
     shsl_env_def(env, shsl_mksym("fnenv"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_fnenv));
 
     // systemy functions
-    shsl_env_def(env, shsl_mksym("exec"),
-                 shsl_mkbuiltin_fn(env, shsl_builtin_exec));
     shsl_env_def(env, shsl_mksym("exec-vec"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_exec_vec));
     shsl_env_def(env, shsl_mksym("exit"),
@@ -4517,16 +4543,67 @@ shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
 
 
 shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
-    // shsl is self contained in one big c file so...
-    // we don't put the standard library in a separate file either
-    // if opengl tutorials can do this then by golly so can we
-
-    // TODO: add this fabled standard library
     static const char* stdlib =
-        "";
-    (void)stdlib;
-    (void)env;
-    return shsl_mkerr(shsl_ref_to_nil(), "todo");
+        "(def defmacro"
+        "  (macro [name args & body]"
+        "         (cons 'def"
+        "               (cons name"
+        "                     (list"
+        "                      (cons 'macro"
+        "                            (cons args"
+        "                                  (vec->list body))))))))"
+
+        "(defmacro defn [name args & body]"
+        "  (cons 'def"
+        "        (cons name"
+        "              (list"
+        "               (cons 'fn"
+        "                     (cons args"
+        "                           (vec->list body)))))))"
+
+        "(defn or-gen [args]"
+        "  (if (= 0 (vec-len args))"
+        "    nil"
+        "    (if (= 1 (vec-len args))"
+        "      (vec-get args 0)"
+        "      (let [first (vec-get args 0)"
+        "            rest (vec-slice args 1)"
+        "            first-sym (gensym \"check\")]"
+        "        (list"
+        "         'let (vec first-sym first)"
+        "         (list 'if first-sym first-sym"
+        "               (or-gen rest)))))))"
+
+        "(defmacro or [& args]"
+        "  (or-gen args))"
+
+        "(defn and-gen [args]"
+        "  (if (= 0 (vec-len args))"
+        "    nil"
+        "    (if (= 1 (vec-len args))"
+        "      (vec-get args 0)"
+        "      (let [first (vec-get args 0)"
+        "            rest (vec-slice args 1)"
+        "            first-sym (gensym \"check\")]"
+        "        (list"
+        "         'let (vec first-sym first)"
+        "         (list 'if (list 'not first-sym) first-sym"
+        "               (and-gen rest)))))))"
+
+        "(defmacro and [& args]"
+        "  (and-gen args))"
+
+        "(defn exec [& args]"
+        "  (exec-vec args))"
+
+        "(defn != [a b]"
+        "  (not (= a b)))"
+
+        "(defn str-at [s i]"
+        "  (str-sub s i (+ i 1)))";
+
+    shsl_eval_str(stdlib, env);
+    return env;
 }
 
 shsl_ref shsl_env_mkinitial(void) {
@@ -4740,7 +4817,7 @@ void shsl_fprint(const shsl_ref ref, FILE* stream) {
 //// ----------------------------------------------------------------------------
 
 /// SHSL SUBROUTINES FOR MAIN DECLARATIONS
-shsl_ref shsl_eval_str(char* c, shsl_ref env) {
+shsl_ref shsl_eval_str(const char* c, shsl_ref env) {
     shsl_ref curr = shsl_ref_to_nil();
     while(true) {
         parser_pair p = parse_off(c);
@@ -4883,33 +4960,30 @@ void shsl_die(int exit_with, const char* errmsg, ...) {
     va_end(args);
     exit(exit_with);
 }
-int shsl_main(int argc, char** argv) {
-    // init
-    shsl_ref env = shsl_env_mkinitial();
-    shsl_env_def(env, shsl_mksym("progname"), shsl_mkstr(argv[0]));
-
+int shsl_main(shsl_ref env, const char* program_name, int argc, char** argv) {
+    shsl_env_def(env, shsl_mksym("progname"), shsl_mkstr(program_name));
     // no args, default behaviour just start a repl
-    if(argc == 1) {
+    if(argc == 0) {
         shsl_repl(env);
-        goto teardown;
+        return 0;
     }
 
     // handle ./shsl [file] [args] case (mainly for shebangs)
     // and ease in passing argv to shsl files
-    if(argv[1][0] != '-') { // if first arg is not a flag
-        shsl_ref shsl_argv = shsl_mkvec(1);
-        for(int i = 2; i<argc; ++i) {
+    if(argv[0][0] != '-') { // if first arg is not a flag
+        shsl_ref shsl_argv = shsl_mkvec(argc-1);
+        for(int i = 1; i<argc; ++i) {
             shsl_vec_push(shsl_argv, shsl_mkstr(argv[i]));
         }
         shsl_env_def(env, shsl_mksym("argv"), shsl_argv);
-        shsl_ref_drop(shsl_ref_add(shsl_eval_file(argv[1], env)));
-        goto teardown;
+        shsl_ref_drop(shsl_ref_add(shsl_eval_file(*argv, env)));
+        return 0;
     }
 
     shsl_env_def(env, shsl_mksym("argv"), shsl_mkvec(0));
 
     // iterate and execute all
-    int i = 1;
+    int i = 0;
     while(i<argc) {
         if(strcmp(argv[i], "-e") == 0) {
             if(i+1 >= argc)
@@ -4918,7 +4992,7 @@ int shsl_main(int argc, char** argv) {
             shsl_ref ref = shsl_eval_str(line, env);
             shsl_ref_add(ref);
             shsl_fprint(ref, stdout);
-            shsl_ref_drop(ref);
+            // shsl_ref_drop(ref);
             puts("");
             i+=2;
         }
@@ -4934,17 +5008,15 @@ int shsl_main(int argc, char** argv) {
             i++;
         }
         else if(strcmp(argv[i], "-h") == 0) {
-            shsl_usage(argv[0], true, stdout);
+            shsl_usage(program_name, true, stdout);
             return 0;
         }
         else {
             fprintf(stderr, "'%s' unrecognized flag!!\n", argv[i]);
-            shsl_usage(argv[0], false, stderr);
+            shsl_usage(program_name, false, stderr);
             return 1;
         }
     }
- teardown:
-    shsl_ref_drop(env);
     return 0;
 }
 

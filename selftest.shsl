@@ -1,6 +1,6 @@
 #!./shsl
 ;; -*- mode:clojure -*-
-;; :vi set ft=clojure:
+;; vi: set ft=clojure:
 
 ;; this is a port of most of the old test.sh file to shsl
 ;; it's just more convenient for a lot of tasks than having to invoke
@@ -14,10 +14,10 @@
     (if log-always (println (str "testing: [" testname "]")))
     (if (!= expected actual)
       (do
-        (err (str "\"" expected "\""
-                  " was supposed to be equal to "
-                  "\"" actual "\""
-                  " but it's not")
+        (err (str "\nexpected value: - " expected
+                  "\nwas supposed to be equal to"
+                  "\nactual value:   - " actual ""
+                  "\nbut it's not")
              testname)
         (println "")))))
 
@@ -99,5 +99,18 @@
 ;; advanced lambda fuckery
 (asseq 10000 (((fn [a] (fn [b] (a (a b)))) (fn [a] (* a a))) 10)
        "advanced lambda fuckery")
+
+;; macros&Co.
+(asseq 10 ((macro [name idfk] (list name idfk)) + 10) "basic macro stuff")
+;; macrolet-ery
+;; this test is invalid given the current spec for how we're doing macros
+;; gotta work on it a bit
+;; (asseq 10
+;;  (let [ctadd (macro [a b] (+ a b))
+;;        ctsub (macro [a b] (- a b))
+;;        ctfst (macro [a b] a)
+;;        ctsnd (macro [a b] b)]
+;;    (ctadd (ctfst 5 10) (ctfst 5 10)))
+;;  "local macros and nested macroexpand fuckery")
 
 (println "\nend of tests! :D")

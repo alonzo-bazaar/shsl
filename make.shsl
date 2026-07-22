@@ -1,20 +1,25 @@
 #!./shsl
 ;; -*- mode:clojurescript -*-
 ;; vi: set ft=clojure:
-(def exec-or-die
-  (fn [name cmd]
-    (println (str "now at step: " name "..."))
-    (set status (exec-vec cmd))
-    (println (str "finished step: " name "\n"))
-    (if (not status)
-      (do
-        (println "step exited with failure, exiting build script")
-        (exit 1)))))
+(defn arg? [arg] (find argv arg))
 
-(def cc "gcc")
+(defn exec-or-die [name cmd]
+  (println (str "now at step: " name "..."))
+  (set status (exec-vec cmd))
+  (println (str "finished step: " name "\n"))
+  (if (not status)
+    (do
+      (println "step exited with failure, exiting build script")
+      (exit 1))))
+
+(def cc "clang")
 (def common-cflags ["-Wall" "-Wextra" "-Wpedantic" "-Wswitch" "-Wno-parentheses"
                     "-Werror"
                     "-O0" "-g3" "-ggdb"])
+
+(defn peace-out []
+  (println "ight imma peace out")
+  (exit 0))
 
 (exec-or-die "compiling shsl executable"
              (vec-cat
@@ -23,11 +28,21 @@
               ["-DSHSL_LOG_ERROR" "-DSHSL_LOG_ERROR_EXPR"]
               ["-o" "shsl" "shsl.c"]))
 
+(if (arg? "--compile-only")
+  (peace-out))
+
 (exec-or-die "running self tests"
              ["./selftest.shsl"])
 
+(if (arg? "--stop-at-self-test")
+  (peace-out))
+
 (exec-or-die "running shell tests"
              ["./test.sh"])
+
+(if (or (arg? "--stop-at-shell-test")
+        (arg? "--no-library-test"))
+  (peace-out))
 
 (exec-or-die "compiling library tests"
              (vec-cat
@@ -40,4 +55,4 @@
 (exec-or-die "running library tests"
              ["./tests"])
 
-(println "if nothing above aborted all tests pass!")
+(println "if none of the above aborted we're all good")
