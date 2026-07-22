@@ -42,8 +42,7 @@
 int main(int argc, char** argv) {
     shsl_ref env = shsl_ref_add(shsl_env_mkempty());
     shsl_env_add_initial_definitions(env);
-    // shsl_env_eval_stdlib(env);
-
+    shsl_env_eval_stdlib(env);
     // shsl_add_exec_defs(env);
     // shsl_add_fs_defs(env);
 
@@ -51,5 +50,6 @@ int main(int argc, char** argv) {
     ARGS_SHIFT(argc, argv);
     int ret = shsl_main(env, shsl_program_name, argc, argv);
     shsl_ref_drop(env);
+    // shsl_free(env);
     return ret;
 }

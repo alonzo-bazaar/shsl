@@ -2803,7 +2803,7 @@ shsl_expr* shsl_form_to_expr(shsl_ref form, shsl_ref env) {
         shsl_expr* fn_expr = shsl_form_to_expr(form.ptr->cons.car, env);
         shsl_ref fn = shsl_ref_to_nil();
         if(fn_expr->type == SHSL_EXPR_MACRO) {
-            fn = shsl_eval(fn_expr, env);
+            fn = shsl_ref_add(shsl_eval(fn_expr, env));
         }
         else if(fn_expr->type == SHSL_EXPR_LOOKUP) {
             // to avoid generating potential runtime errors at compiletime
@@ -2816,32 +2816,43 @@ shsl_expr* shsl_form_to_expr(shsl_ref form, shsl_ref env) {
             // instead of returning (and potentially logging) an error
             // and as long as the default return value is not a macro, doesn't
             // change shit for our purposes
-            fn = shsl_env_lookup_or(env,
-                                    fn_expr->lookup_symbol,
-                                    shsl_ref_to_nil());
+            fn = shsl_ref_add(shsl_env_lookup_or(env,
+                                                 fn_expr->lookup_symbol,
+                                                 shsl_ref_to_nil()));
         }
 
         if(shsl_is_macro(fn)) {
+            // if we're on this branch then fn_expr has run its course
+            // it told us which macro we were supposed to run, but we don't use
+            // fn_expr anywhere in here, so we gotta free it
+            shsl_expr_free(fn_expr);
+
             // macros are functions and functions expect their arguments inside
             // a vector
             shsl_cb args_builder = shsl_cb_make(SHSL_CB_VEC);
             for(shsl_ref i = shsl_cdr(form); shsl_is_cons(i); i = shsl_cdr(i)) {
                 shsl_cb_add(&args_builder, shsl_car(i));
             }
-            shsl_ref args_vec = shsl_cb_get(args_builder);
+            shsl_ref args_vec = shsl_ref_add(shsl_cb_get(args_builder));
             switch(shsl_type(fn)) {
             case SHSL_BUILTIN_MACRO: {
-                shsl_ref new_form = shsl_call_builtin_fn(fn, args_vec);
-                shsl_ref_add(new_form);
+                shsl_ref new_form = shsl_ref_add
+                    (shsl_call_builtin_fn(fn, args_vec));
                 shsl_expr* new_expr = shsl_form_to_expr(new_form, env);
+
                 shsl_ref_drop(new_form);
+                shsl_ref_drop(args_vec);
+                shsl_ref_drop(fn);
                 return new_expr;
             }
             case SHSL_USER_MACRO: {
-                shsl_ref new_form = shsl_call_user_fn(fn, args_vec);
-                shsl_ref_add(new_form);
+                shsl_ref new_form = shsl_ref_add
+                    (shsl_call_user_fn(fn, args_vec));
                 shsl_expr* new_expr = shsl_form_to_expr(new_form, env);
+
                 shsl_ref_drop(new_form);
+                shsl_ref_drop(args_vec);
+                shsl_ref_drop(fn);
                 return new_expr;
             }
             default:
@@ -2850,6 +2861,8 @@ shsl_expr* shsl_form_to_expr(shsl_ref form, shsl_ref env) {
             }
         }
         else {
+            if(!shsl_is_nil(fn)) shsl_ref_drop(fn);
+
             shsl_expr** args = shsl_form_list_to_expr_arr(shsl_cdr(form), env);
             ssize_t  err_ind = shsl_expr_arr_find_err(args, form_length-1);
             if(err_ind != -1) {
@@ -3313,11 +3326,21 @@ shsl_ref shsl_env_def(shsl_ref env, shsl_ref key, shsl_ref new_val) {
 
     shsl_map_set(shsl_car(env), key, new_val);
 
-    if(shsl_is_fn(new_val)
-       && shsl_fn_env(new_val).ptr == env.ptr
-       && env.ptr->ref_count > 1)
-        shsl_fn_env_mark_weak(new_val);
-
+    // mildly shitty circular reference detection, and only for function types
+    // it works for my use cases so... I shall stick with this for now I suppose
+    if(shsl_is_fn(new_val)) {
+        bool risk_circular = false;
+        for(shsl_ref fn_env = shsl_fn_env(new_val);
+            !shsl_is_nil(fn_env);
+            fn_env = shsl_cdr(fn_env)) {
+            if(fn_env.ptr == env.ptr) {
+                risk_circular = true;
+                break;
+            }
+        }
+        if(risk_circular)
+            shsl_fn_env_mark_weak(new_val);
+    }
     return new_val;
 }
 
@@ -3458,12 +3481,12 @@ shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
             return res;
         }
         case SHSL_BUILTIN_MACRO:
-            shsl_free(args);
+            shsl_ref_drop(args);
             return shsl_mkerr
                 (fn, "macro call should have been handled at macro expand time, "
                  "it is an error to call a macro at eval time"); 
         case SHSL_USER_MACRO:
-            shsl_free(args);
+            shsl_ref_drop(args);
             return shsl_mkerr
                 (fn, "macro call should have been handled at macro expand time, "
                  "it is an error to call a macro at eval time"); 
@@ -3472,7 +3495,7 @@ shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
             // thing
             // further todo: make keywords self evaluating
         default:
-            shsl_free(args);
+            shsl_ref_drop(args);
             return shsl_mkerr(fn, "object is not callable!"); 
         }
     }
@@ -4543,72 +4566,134 @@ shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
 
 
 shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
-    static const char* stdlib =
-        "(def defmacro"
-        "  (macro [name args & body]"
-        "         (cons 'def"
-        "               (cons name"
-        "                     (list"
-        "                      (cons 'macro"
-        "                            (cons args"
-        "                                  (vec->list body))))))))"
+    shsl_eval_str(";; some basics we're just gonna need\n"
+                  "(def defmacro"
+                  "  (macro [name args & body]"
+                  "         (cons 'def"
+                  "               (cons name"
+                  "                     (list"
+                  "                      (cons 'macro"
+                  "                            (cons args"
+                  "                                  (vec->list body))))))))"
 
-        "(defmacro defn [name args & body]"
-        "  (cons 'def"
-        "        (cons name"
-        "              (list"
-        "               (cons 'fn"
-        "                     (cons args"
-        "                           (vec->list body)))))))"
+                  "(defmacro defn [name args & body]"
+                  "  (cons 'def"
+                  "        (cons name"
+                  "              (list"
+                  "               (cons 'fn"
+                  "                     (cons args"
+                  "                           (vec->list body)))))))",
+                  env);
 
-        "(defn or-gen [args]"
-        "  (if (= 0 (vec-len args))"
-        "    nil"
-        "    (if (= 1 (vec-len args))"
-        "      (vec-get args 0)"
-        "      (let [first (vec-get args 0)"
-        "            rest (vec-slice args 1)"
-        "            first-sym (gensym \"check\")]"
-        "        (list"
-        "         'let (vec first-sym first)"
-        "         (list 'if first-sym first-sym"
-        "               (or-gen rest)))))))"
+    shsl_eval_str(";; with due apologies to rich hickey\n"
+                  "(defn caar [l] (car (car l)))"
+                  "(defn cadr [l] (car (cdr l)))"
+                  "(defn cdar [l] (cdr (car l)))"
+                  "(defn cddr [l] (cdr (cdr l)))",
+                  env);
 
-        "(defmacro or [& args]"
-        "  (or-gen args))"
+    shsl_eval_str(";; some small dumb utility things\n"
+                  "(defn != [a b] (not (= a b)))",
+                  env);
 
-        "(defn and-gen [args]"
-        "  (if (= 0 (vec-len args))"
-        "    nil"
-        "    (if (= 1 (vec-len args))"
-        "      (vec-get args 0)"
-        "      (let [first (vec-get args 0)"
-        "            rest (vec-slice args 1)"
-        "            first-sym (gensym \"check\")]"
-        "        (list"
-        "         'let (vec first-sym first)"
-        "         (list 'if (list 'not first-sym) first-sym"
-        "               (and-gen rest)))))))"
+    shsl_eval_str(";; poor man's quasiquoting\n"
+                  "(defn if-code [check then else]"
+                  "  (list 'if check then else))"
 
-        "(defmacro and [& args]"
-        "  (and-gen args))"
+                  "(defn do-code [exprs-lst]"
+                  "  (cons 'do exprs-lst))"
 
-        "(defn exec [& args]"
-        "  (exec-vec args))"
+                  "(defn not-code [expr]"
+                  "  (list 'not expr))"
 
-        "(defn != [a b]"
-        "  (not (= a b)))"
+                  "(defn let-code [binds body]"
+                  "  (list 'let binds body))"
 
-        "(defn str-at [s i]"
-        "  (str-sub s i (+ i 1)))";
+                  "(defn do-code [exprs-lst]"
+                  "  (cons 'do exprs-lst))"
 
-    shsl_eval_str(stdlib, env);
+                  "(defn not-code [expr]"
+                  "  (list 'not expr))"
+
+                  "(defn let-code [binds & body]"
+                  "  (cons 'let (cons binds (vec->list body))))",
+                  env);
+
+    shsl_eval_str(";; and now, time for hella macros\n"
+                  "(defmacro when [check & then]"
+                  "  (if-code check (do-code (vec->list then)) nil))"
+
+                  "(defmacro unless [check & else]"
+                  "  (if-code (not-code check) (do-code (vec->list else)) nil))"
+
+                  "(defn cond-code [conds]"
+                  "  (if conds"
+                  "    (let [fs (car conds)]"
+                  "      (if-code (car fs)"
+                  "        (do-code (cdr fs))"
+                  "        (cond-code (cdr conds))))))"
+
+                  "(defmacro cond [& conds]"
+                  "  (cond-code (vec->list conds)))",
+                  env);
+
+    shsl_eval_str("(defn or-code [args]"
+                  "  (cond ((nil? args) nil)"
+                  "        ((nil? (cdr args)) (car args))"
+                  "        (t (let [fir (car args)"
+                  "                 firsym (gensym \"check\")"
+                  "                 res (cdr args)]"
+                  "             (let-code [firsym fir]"
+                  "               (if-code firsym firsym (or-code res)))))))"
+
+                  "(defmacro or [& args]"
+                  "  (or-code (vec->list args)))",
+                  env);
+
+    shsl_eval_str("(defn and-code [args]"
+                  "  (cond ((nil? args) nil)"
+                  "        ((nil? (cdr args)) (car args))"
+                  "        (t (let [fir (car args)"
+                  "                 firsym (gensym \"check\")"
+                  "                 res (cdr args)]"
+                  "             (let-code [firsym fir]"
+                  "               (if-code (not-code firsym)"
+                  "                 firsym"
+                  "                 (and-code res)))))))"
+                  
+                  "(defmacro and [& args]"
+                  "  (and-code (vec->list args)))",
+                  env);
+
+    shsl_eval_str("(defn str-find [haystack needle]"
+                  "  (let [i 0"
+                  "        l (str-len haystack)]"
+                  "    (while (and (!= i l) (!= (str-at haystack i) needle))"
+                  "      (set i (+ i 1)))"
+                  "    (if (!= i l) i nil)))"
+                  
+                  "(defn vec-find [haystack needle]"
+                  "  (let [i 0"
+                  "        l (vec-len haystack)]"
+                  "    (while (and (!= i l) (!= (vec-get haystack i) needle))"
+                  "      (set i (+ i 1)))"
+                  "    (if (!= i l) i nil)))"
+
+                  "(defn find [haystack needle]"
+                  "  (cond ((vec? haystack)"
+                  "         (vec-idxof haystack needle))"
+                  "        ((str? haystack)"
+                  "         (str-idxof haystack needle))"
+                  "        (t (err \"idxof: unrecognized haystack type\""
+                  "                [needle haystack]))))",
+                  env);
     return env;
 }
 
 shsl_ref shsl_env_mkinitial(void) {
     shsl_ref env = shsl_ref_add(shsl_env_mkempty());
     shsl_env_add_initial_definitions(env);
+    shsl_env_eval_stdlib(env);
     return env;
 }
 
@@ -4972,9 +5057,9 @@ int shsl_main(shsl_ref env, const char* program_name, int argc, char** argv) {
     // and ease in passing argv to shsl files
     if(argv[0][0] != '-') { // if first arg is not a flag
         shsl_ref shsl_argv = shsl_mkvec(argc-1);
-        for(int i = 1; i<argc; ++i) {
+        for(int i = 1; i<argc; ++i)
             shsl_vec_push(shsl_argv, shsl_mkstr(argv[i]));
-        }
+
         shsl_env_def(env, shsl_mksym("argv"), shsl_argv);
         shsl_ref_drop(shsl_ref_add(shsl_eval_file(*argv, env)));
         return 0;
@@ -4992,7 +5077,7 @@ int shsl_main(shsl_ref env, const char* program_name, int argc, char** argv) {
             shsl_ref ref = shsl_eval_str(line, env);
             shsl_ref_add(ref);
             shsl_fprint(ref, stdout);
-            // shsl_ref_drop(ref);
+            shsl_ref_drop(ref);
             puts("");
             i+=2;
         }

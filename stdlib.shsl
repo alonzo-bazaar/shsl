@@ -2,112 +2,115 @@
 ;; -*- mode:clojurescript -*-
 ;; vi: set ft=clojure:
 
-;; some basics we're just gonna need
-(def defmacro
-  (macro [name args & body]
-         (cons 'def
-               (cons name
-                     (list
-                      (cons 'macro
-                            (cons args
-                                  (vec->list body))))))))
+";; some basics we're just gonna need"
+"(def defmacro"
+"  (macro [name args & body]"
+"         (cons 'def"
+"               (cons name"
+"                     (list"
+"                      (cons 'macro"
+"                            (cons args"
+"                                  (vec->list body))))))))"
+""
+""
+"(defmacro defn [name args & body]"
+"  (cons 'def"
+"        (cons name"
+"              (list"
+"               (cons 'fn"
+"                     (cons args"
+"                           (vec->list body)))))))"
+""
+";; with due apologies to rich hickey"
+"(defn caar [l] (car (car l)))"
+"(defn cadr [l] (car (cdr l)))"
+"(defn cdar [l] (cdr (car l)))"
+"(defn cddr [l] (cdr (cdr l)))"
+""
+";; poor man's quasiquoting"
+"(defn if-code [check then else]"
+"  (list 'if check then else))"
+""
+"(defn do-code [exprs-lst]"
+"  (cons 'do exprs-lst))"
+""
+"(defn not-code [expr]"
+"  (list 'not expr))"
+""
+"(defn let-code [binds body]"
+"  (list 'let binds body))"
+""
+"(defn do-code [exprs-lst]"
+"  (cons 'do exprs-lst))"
+""
+"(defn not-code [expr]"
+"  (list 'not expr))"
+""
+"(defn let-code [binds & body]"
+"  (cons 'let (cons binds (vec->list body))))"
+""
+";; and now, time for hella macros"
+"(defmacro when [check & then]"
+"  (if-code check (do-code (vec->list then)) nil))"
+"(defmacro unless [check & else]"
+"  (if-code (not-code check) (do-code (vec->list else)) nil))"
+""
+"(defn cond-code [conds]"
+"  (if conds"
+"    (let [fs (car conds)]"
+"      (if-code (car fs)"
+"        (do-code (cdr fs))"
+"        (cond-code (cdr conds))))))"
+""
+"(defmacro cond [& conds]"
+"  (cond-code (vec->list conds)))"
+""
+"(defn or-code [args]"
+"  (cond ((nil? args) nil)"
+"        ((nil? (cdr args)) (car args))"
+"        (t (let [fir (car args)"
+"                 firsym (gensym \"check\")"
+"                 res (cdr args)]"
+"             (let-code [firsym fir]"
+"               (if-code firsym firsym (or-code res)))))))"
+""
+"(defmacro or [& args]"
+"  (or-code (vec->list args)))"
+""
 
+"(defn and-code [args]"
+"  (cond ((nil? args) nil)"
+"        ((nil? (cdr args)) (car args))"
+"        (t (let [fir (car args)"
+"                 firsym (gensym \"check\")"
+"                 res (cdr args)]"
+"             (let-code [firsym fir]"
+"               (if-code (not-code firsym)"
+"                 firsym"
+"                 (and-code res)))))))"
 
-(defmacro defn [name args & body]
-  (cons 'def
-        (cons name
-              (list
-               (cons 'fn
-                     (cons args
-                           (vec->list body)))))))
-
-;; with due apologies to rich hickey
-(defn caar [l] (car (car l)))
-(defn cadr [l] (car (cdr l)))
-(defn cdar [l] (cdr (car l)))
-(defn cddr [l] (cdr (cdr l)))
-
-;; poor man's quasiquoting
-(defn if-code [then else]
-  (list 'if then else))
-
-(defn do-code [exprs-lst]
-  (cons 'do exprs-lst))
-
-(defn not-code [expr]
-  (list 'not expr))
-
-(defn let-code [binds body]
-  (list 'let binds body))
-
-(defn if-code [then else]
-  (list 'if then else))
-
-(defn do-code [exprs-lst]
-  (cons 'do exprs))
-
-(defn not-code [expr]
-  (list 'not expr))
-
-(defn let-code [binds body]
-  (list 'let binds body))
-
-;; and now, time for hella macros
-(defmacro when [check then]
-  (list 'if check then 'nil))
-(defmacro unless [check else]
-  (list 'if check 'nil else))
-
-(defn cond-code [conds]
-  (if conds
-    (let [fs (car conds)]
-      (if-code (car fs) (do-code (cdr fs)) (cdrs conds)))))
-
-(defmacro cond [& conds]
-  (cond-code vec->list conds))
-
-
-(defn or-code [args]
-  (cond ((nil? args) nil)
-        ((and args (nil? (cdr args))) (car args))
-        (t (let [fir (car args)
-                 firsym (gensym "check")
-                 res (cdr args)]
-             (let-code [firsym fir]
-               (if-code firsym firsym (or-code res)))))))
-
-(defmacro or [& args]
-  (or-code (vec->list args)))
-
-(defn and-code [args]
-  (cond ((nil? args) nil)
-        ((and args (nil? (cdr args))) (car args))
-        (t (let [fir (car args)
-                 firsym (gensym "check")
-                 res (cdr args)]
-             (let-code [firsym first]
-               (if-code (not-code firsym) firsym (and-code res)))))))
-
-(defmacro and [& args]
-  (and-code (vec->list args)))
-
-(defn str-find [haystack needle]
-  (let [i 0
-        l (str-len haystack)]
-    (while (and (!= i l) (!= (str-at haystack i) needle))
-      (set i (+ i 1)))
-    (if (!= i l) i nil)))
-
-(defn vec-find [haystack needle]
-  (let [i 0
-        l (vec-len haystack)]
-    (while (and (!= i l) (!= (vec-get haystack i) needle))
-      (set i (+ i 1)))
-    (if (!= i l) i nil)))
-
-(defn find [haystack needle]
-  (cond ((vec? haystack) (vec-idxof haystack needle))
-        ((str? haystack) (str-idxof haystack needle))
-        (t (err "idxof: unrecognized haystack type" [needle haystack]))))
-
-(println "è tutto pronto")
+""
+"(defmacro and [& args]"
+"  (and-code (vec->list args)))"
+""
+"(defn str-find [haystack needle]"
+"  (let [i 0"
+"        l (str-len haystack)]"
+"    (while (and (!= i l) (!= (str-at haystack i) needle))"
+"      (set i (+ i 1)))"
+"    (if (!= i l) i nil)))"
+""
+"(defn vec-find [haystack needle]"
+"  (let [i 0"
+"        l (vec-len haystack)]"
+"    (while (and (!= i l) (!= (vec-get haystack i) needle))"
+"      (set i (+ i 1)))"
+"    (if (!= i l) i nil)))"
+""
+"(defn find [haystack needle]"
+"  (cond ((vec? haystack)"
+"         (vec-idxof haystack needle))"
+"        ((str? haystack)"
+"         (str-idxof haystack needle))"
+"        (t (err \"idxof: unrecognized haystack type\""
+"                [needle haystack]))))""

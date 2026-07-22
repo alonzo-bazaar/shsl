@@ -1,25 +1,40 @@
 #!./shsl
-;; -*- mode:clojurescript -*-
+;; -*- mode:clojure -*-
 ;; vi: set ft=clojure:
-(defn arg? [arg] (find argv arg))
-
-(defn exec-or-die [name cmd]
-  (println (str "now at step: " name "..."))
-  (set status (exec-vec cmd))
-  (println (str "finished step: " name "\n"))
-  (if (not status)
-    (do
-      (println "step exited with failure, exiting build script")
-      (exit 1))))
-
 (def cc "clang")
 (def common-cflags ["-Wall" "-Wextra" "-Wpedantic" "-Wswitch" "-Wno-parentheses"
                     "-Werror"
                     "-O0" "-g3" "-ggdb"])
 
+(defn arg? [arg]
+  (let [i 0
+        l (vec-len argv)]
+    (while (and (!= i l) (!= (vec-get argv i) arg))
+      (set i (+ i 1)))
+    (not (= i l))))
+
 (defn peace-out []
-  (println "ight imma peace out")
+  (println (str "[PEACE OUT] cya!"))
   (exit 0))
+
+(defn die [msg]
+  (println (str "[FATAL ERROR] " msg))
+  (exit 1))
+
+(defn exec-or-die [name cmd]
+  (println (str "now at step: " name "..."))
+  (println (str "running command:\n" cmd))
+  (set status (exec-vec cmd))
+  (println (str "finished step: " name "\n"))
+  (or status (die "step exited with failure, exiting build script")))
+
+(defn exec-valgrind []
+  (exec-or-die "running self tests under valgrind"
+               ["valgrind"
+                "--tool=memcheck" "--leak-check=full" "-s"
+                "./shsl" "./selftest.shsl"]))
+
+(if (arg? "--valgrind-only") (do (exec-valgrind) (peace-out)))
 
 (exec-or-die "compiling shsl executable"
              (vec-cat
@@ -28,28 +43,26 @@
               ["-DSHSL_LOG_ERROR" "-DSHSL_LOG_ERROR_EXPR"]
               ["-o" "shsl" "shsl.c"]))
 
-(if (arg? "--compile-only")
-  (peace-out))
+(if (arg? "--compile-only") (peace-out))
+(if (arg? "--valgrind")
+  (do (exec-valgrind) (if (arg? "--stop-at-valgrind") (peace-out))))
 
 (exec-or-die "running self tests"
              ["./selftest.shsl"])
 
-(if (arg? "--stop-at-self-test")
-  (peace-out))
+(if (arg? "--stop-at-self-test") (peace-out))
 
 (exec-or-die "running shell tests"
              ["./test.sh"])
 
-(if (or (arg? "--stop-at-shell-test")
-        (arg? "--no-library-test"))
-  (peace-out))
+(if (or (arg? "--stop-at-shell-test") (arg? "--no-library-test")) (peace-out))
 
 (exec-or-die "compiling library tests"
              (vec-cat
               [cc]
               common-cflags
               ["-DSHSL_LOG_ERROR" "-DSHSL_LOG_ERROR_EXPR"]
-                                        ; ["-DSHSL_LOG_TESTS"]
+              ;; ["-DSHSL_LOG_TESTS"]
               ["-o" "tests" "tests.c"]))
 
 (exec-or-die "running library tests"
