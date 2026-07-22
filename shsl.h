@@ -4681,10 +4681,10 @@ shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
 
                   "(defn find [haystack needle]"
                   "  (cond ((vec? haystack)"
-                  "         (vec-idxof haystack needle))"
+                  "         (vec-find haystack needle))"
                   "        ((str? haystack)"
-                  "         (str-idxof haystack needle))"
-                  "        (t (err \"idxof: unrecognized haystack type\""
+                  "         (str-find haystack needle))"
+                  "        (t (err \"find: unrecognized haystack type\""
                   "                [needle haystack]))))",
                   env);
     return env;

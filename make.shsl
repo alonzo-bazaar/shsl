@@ -1,25 +1,24 @@
 #!./shsl
 ;; -*- mode:clojure -*-
 ;; vi: set ft=clojure:
+
+;; global data
 (def cc "clang")
 (def common-cflags ["-Wall" "-Wextra" "-Wpedantic" "-Wswitch" "-Wno-parentheses"
                     "-Werror"
                     "-O0" "-g3" "-ggdb"])
 
+;; global functions
 (defn arg? [arg]
-  (let [i 0
-        l (vec-len argv)]
-    (while (and (!= i l) (!= (vec-get argv i) arg))
-      (set i (+ i 1)))
-    (not (= i l))))
-
-(defn peace-out []
-  (println (str "[PEACE OUT] cya!"))
-  (exit 0))
+  (find argv arg))
 
 (defn die [msg]
   (println (str "[FATAL ERROR] " msg))
   (exit 1))
+
+(defn peace-out []
+  (println (str "[PEACE OUT] cya!"))
+  (exit 0))
 
 (defn exec-or-die [name cmd]
   (println (str "now at step: " name "..."))
@@ -34,7 +33,9 @@
                 "--tool=memcheck" "--leak-check=full" "-s"
                 "./shsl" "./selftest.shsl"]))
 
-(if (arg? "--valgrind-only") (do (exec-valgrind) (peace-out)))
+;; parse flags and do the things
+(if (arg? "--valgrind-only")
+  (do (exec-valgrind) (peace-out)))
 
 (exec-or-die "compiling shsl executable"
              (vec-cat
@@ -43,19 +44,24 @@
               ["-DSHSL_LOG_ERROR" "-DSHSL_LOG_ERROR_EXPR"]
               ["-o" "shsl" "shsl.c"]))
 
-(if (arg? "--compile-only") (peace-out))
+(if (arg? "--compile-only")
+  (peace-out))
 (if (arg? "--valgrind")
-  (do (exec-valgrind) (if (arg? "--stop-at-valgrind") (peace-out))))
+  (do (exec-valgrind)
+      (if (arg? "--stop-at-valgrind") (peace-out))))
 
 (exec-or-die "running self tests"
              ["./selftest.shsl"])
 
-(if (arg? "--stop-at-self-test") (peace-out))
+(if (arg? "--stop-at-self-test")
+  (peace-out))
 
 (exec-or-die "running shell tests"
              ["./test.sh"])
 
-(if (or (arg? "--stop-at-shell-test") (arg? "--no-library-test")) (peace-out))
+(if (or (arg? "--stop-at-shell-test")
+        (arg? "--no-library-test"))
+  (peace-out))
 
 (exec-or-die "compiling library tests"
              (vec-cat
