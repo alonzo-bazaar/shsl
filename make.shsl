@@ -15,7 +15,7 @@
   (exit 0))
 
 (def log-step? (not (arg? "--no-log-step")))
-(def log-cmd? (not (arg? "--no-log-cmd")))
+(def log-cmd? (arg? "--log-cmd"))
 
 (defn exec-or-die [name cmd]
   (when log-step? (println (str "now at step: " name "...")))

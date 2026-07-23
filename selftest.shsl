@@ -7,11 +7,13 @@
 ;; shsl half a dozen times
 
 (def log-always nil)
+(defn logln [arg]
+  (println (str "[" progname "] " arg)))
 
 ;; this should have been a macro :(
 (def asseq
   (fn [expected actual testname]
-    (if log-always (println (str "testing: [" testname "]")))
+    (if log-always (logln (str "testing: [" testname "]")))
     (if (!= expected actual)
       (do
         (err (str "\nexpected value: - " expected
@@ -69,7 +71,13 @@
        "if <something> then")
 (asseq 'a (if 'a 'a 'b)
        "if <something> then else")
-(asseq nil (if (err "this is a test error don't worry" 'dwai) 'a)
+
+(defmacro muted [& body]
+  (cons 'with-log-level (cons log-level-none (vec->list body))))
+(asseq nil (if (muted (err "you should not see this error" 'dwai)) 'a)
+       "errors should be falsey")
+
+(asseq nil (if (err "you should be seeing see this error" "it's all good :3") 'a)
        "errors should be falsey")
 (asseq "goodbye" (if (!= "a" (str 'a)) "hello" "goodbye")
        "if then else")
@@ -102,6 +110,7 @@
 
 ;; macros&Co.
 (asseq 10 ((macro [name idfk] (list name idfk)) + 10) "basic macro stuff")
+
 ;; macrolet-ery
 ;; this test is invalid given the current spec for how we're doing macros
 ;; gotta work on it a bit
@@ -113,4 +122,4 @@
 ;;    (ctadd (ctfst 5 10) (ctfst 5 10)))
 ;;  "local macros and nested macroexpand fuckery")
 
-(println "\nend of tests! :D")
+(logln "end of tests! :D")

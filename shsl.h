@@ -4609,6 +4609,7 @@ shsl_defun(shsl_builtin_set_log_level, "set-log-level!", args, env, {
         case SHSL_LOG_LEVEL_INFO:
         case SHSL_LOG_LEVEL_WARNING:
         case SHSL_LOG_LEVEL_ERROR:
+        case SHSL_LOG_LEVEL_FATAL:
         case SHSL_LOG_LEVEL_NONE:
             SHSL_GLOBAL_LOG_LEVEL = new_log_level;
             return shsl_ref_to_nil();
@@ -4760,10 +4761,16 @@ shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
                  shsl_mkbuiltin_fn(env, shsl_builtin_err));
 
     // logging functions (and constants)
-    shsl_env_def(env, shsl_mksym("log-level-info"), shsl_mkint(1));
-    shsl_env_def(env, shsl_mksym("log-level-warning"), shsl_mkint(2));
-    shsl_env_def(env, shsl_mksym("log-level-error"), shsl_mkint(3));
-    shsl_env_def(env, shsl_mksym("log-level-none"), shsl_mkint(10));
+    shsl_env_def(env, shsl_mksym("log-level-info"),
+                 shsl_mkint(SHSL_LOG_LEVEL_INFO));
+    shsl_env_def(env, shsl_mksym("log-level-warning"),
+                 shsl_mkint(SHSL_LOG_LEVEL_WARNING));
+    shsl_env_def(env, shsl_mksym("log-level-error"),
+                 shsl_mkint(SHSL_LOG_LEVEL_ERROR));
+    shsl_env_def(env, shsl_mksym("log-level-fatal"),
+                 shsl_mkint(SHSL_LOG_LEVEL_FATAL));
+    shsl_env_def(env, shsl_mksym("log-level-none"),
+                 shsl_mkint(SHSL_LOG_LEVEL_NONE));
 
     shsl_env_def(env, shsl_mksym("log-level"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_log_level));
@@ -4853,6 +4860,12 @@ shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
                   "(defn not-code [expr]"
                   "  (list 'not expr))"
 
+                  "(defn set-code [a b]"
+                  "  (list 'set a b))"
+
+                  "(defn def-code [a b]"
+                  "  (list 'def a b))"
+
                   "(defn let-code [binds & body]"
                   "  (cons 'let (cons binds (vec->list body))))",
                   env);
@@ -4924,6 +4937,17 @@ shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
                   "         (str-find haystack needle))"
                   "        (t (err \"find: unrecognized haystack type\""
                   "                [needle haystack]))))",
+                  env);
+
+    shsl_eval_str("(defmacro with-log-level [body-ll & body]"
+                  "  (let [old-ll-sym (gensym \"old-log-level\")"
+                  "        body-res-sym (gensym \"body-res\")]"
+                  "    (let-code [old-ll-sym '(log-level)]"
+                  "      (list 'do"
+                  "            (list 'set-log-level! body-ll)"
+                  "            (set-code body-res-sym (do-code (vec->list body)))"
+                  "            (list 'set-log-level! old-ll-sym)"
+                  "            body-res-sym))))",
                   env);
     return env;
 }
@@ -5275,10 +5299,10 @@ void shsl_usage(const char* name, bool print_extra, FILE* stream) {
     if(print_extra)
         fprintf(stream, extra, name);
 }
-void shsl_die(int exit_with, const char* errmsg, ...) {
+void shsl_die(int exit_with, const char* fmt, ...) {
     va_list args;
-    va_start(args, errmsg);
-    vfprintf(stderr, errmsg, args);
+    va_start(args, fmt);
+    shsl_vlog(stderr, SHSL_LOG_LEVEL_FATAL, fmt, args);
     fprintf(stderr, "\n");
     va_end(args);
     exit(exit_with);

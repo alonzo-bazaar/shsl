@@ -191,15 +191,12 @@ int main(int argc, char** argv) {
     (void)argc;
     (void)argv;
 
-    puts("RUNNING TESTS...");
+    puts("[SHSL TESTS] running tests...");
     SHSL_TEST(test_some_shit());
     SHSL_TEST(test_collection_builders());
     SHSL_TEST(test_collection_literals());
     SHSL_TEST(test_error());
     SHSL_TEST(test_logging());
-    puts("IF YOU SEE THIS AND NOTHING BLEW UP ALL TESTS PASS!");
-    // TODO: make logging flag runtime thing so I can disable it for
-    // error generation tests
-    puts("(error messages above are likely from test error generation, ignore them)");
+    puts("[SHSL TESTS] if you see this and nothing blew up all tests pass!");
     return 0;
 }

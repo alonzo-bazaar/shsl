@@ -6,10 +6,15 @@
 SHSL_EXEC="./shsl"
 shsl_build_result=
 
+# I'm a cheeky bastard
+log () {
+    echo "[$0] $*"
+}
+
 build_clean_shsl() {
-    echo "cleaning previous shsl..."
+    log "cleaning previous shsl..."
     make clean
-    echo "building new shsl..."
+    log "building new shsl..."
     LOG_MEM=no LOG_ERR=yes make shsl
     shsl_build_result=$?
 }
@@ -17,11 +22,11 @@ build_clean_shsl() {
 if false; then
     build_clean_shsl
     if [[ shsl_build_result ]]; then
-        echo ""
-        echo "successfully built shsl! now testing it"
+        log ""
+        log "successfully built shsl! now testing it"
     else
-        echo ""
-        echo "shsl build exited with error! not proceeding further"
+        log ""
+        log "shsl build exited with error! not proceeding further"
         exit "$shsl_build_result"
     fi
 fi
@@ -34,15 +39,15 @@ assert_shsl_equal() {
     local actual_value=$("$SHSL_EXEC" -e "$actual_code")
 
     if [[ "$expected_value" != "$actual_value" ]]; then
-        echo "assertion failed!"
-        [[ -n "$errmsg" ]] && echo "WITH ERROR: \"$errmsg\""
-        echo "[$SHSL_EXEC -e $actual_code] was supposed to return [$expected_value]"
-        echo "but instead it returned [$actual_value]"
+        log "assertion failed!"
+        [[ -n "$errmsg" ]] && log "WITH ERROR: \"$errmsg\""
+        log "[$SHSL_EXEC -e $actual_code] was supposed to return [$expected_value]"
+        log "but instead it returned [$actual_value]"
         exit 1
     fi
 }
 
-echo "testing shsl..."
+log "starting shell tests..."
 
 assert_shsl_equal 'nil' "" "an empty program should return nil"
 assert_shsl_equal 'nil' "    " "an program made of only spaces should return nil"
@@ -120,7 +125,13 @@ assert_shsl_equal 'b' "(if nil 'a 'b)"
 assert_shsl_equal 'a' "(if t 'a 'b)"
 assert_shsl_equal 'a' "(if t 'a)"
 assert_shsl_equal 'a' "(if 'a 'a)"
-assert_shsl_equal 'nil' "(if (err \"this is a test error don't worry\" \"dwai\") 'a)"
+# was this necessairy? no
+# but is it fun to use bash as a roundabout lisp macro mechanism? yes
+muted() {
+    local body="$1"
+    echo "(with-log-level log-level-none ${body})"
+}
+assert_shsl_equal 'nil' "(if $(muted "(err \"test error\")") 'a)"
 
 # builtin funs
 assert_shsl_equal 'nil' "(> 10 20)"
@@ -142,4 +153,4 @@ assert_shsl_equal '(a b)' "(cons 'a (cons 'b nil))"
 # lambda fuckery
 assert_shsl_equal '10000' "(((fn [a] (fn [b] (a (a b)))) (fn [a] (* a a))) 10)"
 
-echo "if you see this and nothing blew up then all tests pass!"
+log "if you see this and nothing blew up then all tests pass!"
