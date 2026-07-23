@@ -74,6 +74,32 @@
                              _26, _27, _28, _29, _30,   \
                              ...) _30
 
+/// LOGGING FUNCTIONS DECLARATIONS
+// the lower SHSL_GLOBAL_LOG_LEVEL, the more we log
+// the higher the SHSL_LOG_LEVEL of a call, the more places it is called in
+typedef enum SHSL_LOG_LEVEL {
+    SHSL_LOG_LEVEL_INFO = 1,
+    SHSL_LOG_LEVEL_WARNING,
+    SHSL_LOG_LEVEL_ERROR,
+    SHSL_LOG_LEVEL_FATAL,
+    // you should not set the logging level of a call to SHSL_LOG_LEVEL_NONE
+    // if you want a logging call not to happen, just don't call it
+    // SHSL_LOG_LEVEL_NONE is there only to make setting
+    // SHSL_GLOBAL_LOG_LEVEL = SHSL_LOG_LEVEL_NONE
+    // work as a way to temporairily mute all logging
+    SHSL_LOG_LEVEL_NONE,
+} SHSL_LOG_LEVEL;
+thread_local SHSL_LOG_LEVEL SHSL_GLOBAL_LOG_LEVEL = SHSL_LOG_LEVEL_INFO;
+#define shsl_should_log(log_level) ((log_level) >= SHSL_GLOBAL_LOG_LEVEL)
+size_t shsl_log(FILE* stream, SHSL_LOG_LEVEL log_level, const char* fmt, ...);
+size_t shsl_vlog(FILE* stream, SHSL_LOG_LEVEL log_level,
+                 const char* fmt, va_list args);
+
+#define shsl_log_info(...) shsl_log(stdout, SHSL_LOG_LEVEL_INFO, __VA_ARGS__)
+#define shsl_log_warn(...) shsl_log(stderr, SHSL_LOG_LEVEL_WARNING, __VA_ARGS__)
+#define shsl_log_err(...) shsl_log(stderr, SHSL_LOG_LEVEL_ERROR, __VA_ARGS__)
+#define shsl_log_fatal(...) shsl_log(stderr, SHSL_LOG_LEVEL_FATAL, __VA_ARGS__)
+
 /// CHARACTER AND STRING HANDLING DECLARATIONS
 defstruct(shsl_string_builder);
 void shsl_sb_push(shsl_string_builder* sb, const char c);
@@ -272,6 +298,9 @@ void shsl_free(shsl_ref obj);
 // all equalities here are basically #'equal, deep compare, fuck it
 // we don't care about sameness or equivalence or whatnot, just #'equal
 bool shsl_eq(shsl_ref lhs, shsl_ref rhs);
+// stringify types (mostly for error reporting)
+const char* shsl_stringify_type(SHSL_OBJ_TYPE type);
+const char* shsl_stringify_ref_type(shsl_ref obj);
 
 /// CONS MANIPULATIONS DECLARATIONS
 void shsl_set_car(shsl_ref cons_obj, shsl_ref car);
@@ -330,6 +359,21 @@ long shsl_int(shsl_ref ref);
 double shsl_real(shsl_ref ref);
 const char* shsl_sym_name(shsl_ref sym_ref);
 bool shsl_sym_is_kword(shsl_ref sym);
+
+/// CONVENIENCE COLLECTION CREATION DECLARATIONS
+shsl_ref shsl_list_fromelts_sized(size_t n, ...);
+shsl_ref shsl_vec_fromelts_sized(size_t n, ...);
+shsl_ref shsl_map_fromelts_sized(size_t n, ...);
+shsl_ref shsl_kwmap_fromelts_sized(size_t n, ...);
+
+#define shsl_list_fromelts(...)\
+    shsl_list_fromelts_sized(SHSL_ARG_COUNT(__VA_ARGS__), __VA_ARGS__)
+#define shsl_vec_fromelts(...)\
+    shsl_vec_fromelts_sized(SHSL_ARG_COUNT(__VA_ARGS__), __VA_ARGS__)
+#define shsl_map_fromelts(...)\
+    shsl_map_fromelts_sized(SHSL_ARG_COUNT(__VA_ARGS__), __VA_ARGS__)
+#define shsl_kwmap_fromelts(...)\
+    shsl_kwmap_fromelts_sized(SHSL_ARG_COUNT(__VA_ARGS__), __VA_ARGS__)
 
 /// FUNCTION OPERATIONS DECLARATIONS
 // we have 4 different function types so it's easier to have separate functions
@@ -609,10 +653,64 @@ int shsl_main(shsl_ref env, const char* program_name, int argc, char** argv);
 #endif // SHSL_H
 
 #ifdef SHSL_IMPLEMENTATION
-//// DUMB UTILITIES DECLARATIONS
+//// DUMB UTILITIES DEFINITIONS
 //// ----------------------------------------------------------------------------
 
-/// CHARACTER AND STRING HANDLING DECLARATIONS
+/// LOGGING FUNCTIONS DECLARATIONS
+size_t shsl_log(FILE* stream, SHSL_LOG_LEVEL log_level, const char* fmt, ...) {
+    size_t res = 0;
+    va_list args;
+    va_start(args, fmt);
+    if(shsl_should_log(log_level))
+        res = shsl_vlog(stream, log_level, fmt, args);
+    va_end(args);
+    return res;
+}
+size_t shsl_vlog(FILE* stream, SHSL_LOG_LEVEL log_level,
+                 const char* fmt, va_list args) {
+    size_t acc = 0;
+    if(shsl_should_log(log_level)) {
+        switch(log_level) {
+        case SHSL_LOG_LEVEL_INFO:
+            acc+=fputs("[SHSL INFO] ", stream);
+            break;
+        case SHSL_LOG_LEVEL_WARNING:
+            acc+=fputs("[SHSL WARNING] ", stream);
+            break;
+        case SHSL_LOG_LEVEL_ERROR:
+            acc+=fputs("[SHSL ERROR] ", stream);
+            break;
+        case SHSL_LOG_LEVEL_FATAL:
+            acc+=fputs("[SHSL FATAL ERROR] ", stream);
+            break;
+        default:
+            assert(0 && "you fucked somethig up with the log level");
+        }
+        acc+=vfprintf(stream, fmt, args);
+    }
+    return acc;
+}
+SHSL_LOG_LEVEL shsl_mute_or_unmute_logging(bool mute) {
+    static SHSL_LOG_LEVEL old = 0;
+    if(mute) {
+        old = SHSL_GLOBAL_LOG_LEVEL;
+        SHSL_GLOBAL_LOG_LEVEL = SHSL_LOG_LEVEL_NONE;
+        return old;
+    }
+    else {
+        SHSL_GLOBAL_LOG_LEVEL = old;
+        return old;
+    }
+}
+SHSL_LOG_LEVEL shsl_mute_logging(void) {
+    return shsl_mute_or_unmute_logging(true);
+}
+SHSL_LOG_LEVEL shsl_unmute_logging(void) {
+    return shsl_mute_or_unmute_logging(false);
+}
+
+
+/// CHARACTER AND STRING HANDLING DEFINITIONS
 typedef struct shsl_string_builder {
     char* buf;
     size_t size;
@@ -1060,14 +1158,12 @@ shsl_ref shsl_mksym_nocopy(char* name) {
 #define SHSL_ERR_MAX_LENGTH 1024
 shsl_ref shsl_vmkerr(shsl_ref data, const char* msg, va_list args) {
     static char buf[SHSL_ERR_MAX_LENGTH] = {0};
-    vsprintf(buf, msg, args);
+    int n = vsprintf(buf, msg, args);
 
-#ifdef SHSL_LOG_ERROR
-    fprintf(stderr, "[ERROR] %s\n", buf);
-    fprintf(stderr, "[ERROR] with data: ");
-    shsl_fpr(data, stderr);
-    fputc('\n', stderr);
-#endif
+    if(n >= 0 && shsl_should_log(SHSL_LOG_LEVEL_ERROR)) {
+        shsl_log_err("%*s\n", n, buf);
+        shsl_log_err("with data: "); shsl_fpr(data, stderr); fputc('\n', stderr);
+    }
 
     return_mallocd_obj(.ref_count = 0,
 		       .type = SHSL_ERR,
@@ -1361,6 +1457,28 @@ bool shsl_eq(shsl_ref lhs_ref, shsl_ref rhs_ref) {
 	return false;
     }
     assert(0 && "unreachable");
+}
+
+const char* shsl_stringify_type(SHSL_OBJ_TYPE type) {
+    switch(type) {
+    case SHSL_NIL:           return "shsl nil";
+    case SHSL_SYM:           return "shsl symbol";
+    case SHSL_INT:           return "shsl integer";
+    case SHSL_REAL:          return "shsl real";
+    case SHSL_STR:           return "shsl string";
+    case SHSL_CONS:          return "shsl cons";
+    case SHSL_VEC:           return "shsl vector";
+    case SHSL_MAP:           return "shsl map";
+    case SHSL_BUILTIN_FN:    return "shsl builtin function";
+    case SHSL_USER_FN:       return "shsl user function";
+    case SHSL_BUILTIN_MACRO: return "shsl builtin macro";
+    case SHSL_USER_MACRO:    return "shsl user macro";
+    case SHSL_ERR:           return "shsl error object";
+    }
+    assert(0 && "unreachable");
+}
+const char* shsl_stringify_ref_type(shsl_ref obj) {
+    return shsl_stringify_type(obj.ptr->type);
 }
 
 /// CONS MANIPULATIONS DEFINITIONS
@@ -1661,6 +1779,53 @@ const char* shsl_sym_name(shsl_ref sym_ref) {
 bool shsl_sym_is_kword(shsl_ref sym) {
     assert(shsl_is_sym(sym));
     return shsl_sym_name(sym)[0] == ':';
+}
+
+/// CONVENIENCE COLLECTION CREATION DECLARATIONS
+shsl_ref shsl_list_fromelts_sized(size_t n, ...) {
+    va_list args;
+    shsl_cb cb = shsl_cb_make(SHSL_CB_LIST);
+    va_start(args, n);
+    while(n--) {
+        shsl_cb_add(&cb, va_arg(args, shsl_ref));
+    }
+    va_end(args);
+    return shsl_cb_get(cb);
+}
+shsl_ref shsl_vec_fromelts_sized(size_t n, ...) {
+    va_list args;
+    shsl_cb cb = shsl_cb_make(SHSL_CB_VEC);
+    va_start(args, n);
+    while(n--) {
+        shsl_cb_add(&cb, va_arg(args, shsl_ref));
+    }
+    va_end(args);
+    return shsl_cb_get(cb);
+}
+shsl_ref shsl_map_fromelts_sized(size_t n, ...) {
+    assert(n % 2 == 0 && "map should be built with an even number of elements");
+    va_list args;
+    shsl_cb cb = shsl_cb_make(SHSL_CB_MAP);
+    va_start(args, n);
+    while(n--) {
+        shsl_cb_add(&cb, va_arg(args, shsl_ref));
+    }
+    va_end(args);
+    return shsl_cb_get(cb);
+}
+shsl_ref shsl_kwmap_fromelts_sized(size_t n, ...) {
+    assert(n % 2 == 0 && "map should be built with an even number of elements");
+    va_list args;
+    shsl_cb cb = shsl_cb_make(SHSL_CB_MAP);
+    va_start(args, n);
+    while(n) {
+        n--;
+        shsl_cb_add(&cb, shsl_mksym(va_arg(args, const char*)));
+        n--;
+        shsl_cb_add(&cb, va_arg(args, shsl_ref));
+    }
+    va_end(args);
+    return shsl_cb_get(cb);
 }
 
 /// FUNCTION OPERATIONS DEFINITIONS
@@ -3502,10 +3667,35 @@ shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
             return shsl_mkerr
                 (fn, "macro call should have been handled at macro expand time, "
                  "it is an error to call a macro at eval time"); 
-            // TODO: case SHSL_SYM:
-            // if argument is a map and symbol is a keyword then do the keyword
-            // thing
-            // further todo: make keywords self evaluating
+        case SHSL_SYM: {
+            if(!shsl_sym_is_kword(fn))
+                return shsl_mkerr
+                    (shsl_kwmap_fromelts(":called-sym", fn, ":call-args", args),
+                     "a symbol by itself is not callable, did you mean to call "
+                     "the function called %s or call it as a keyword :%s?",
+                     shsl_sym_name(fn), shsl_sym_name(fn));
+
+            if(shsl_vec_length(args) != 1)
+                return shsl_mkerr
+                    (shsl_kwmap_fromelts(":called-kw", fn, ":call-args", args),
+                     "a keyword invoked like like (:<keword> args...) should "
+                     "be called with only one argument, keyword %s invoked with "
+                     "invalid number of arguments %zu",
+                     shsl_sym_name(fn), shsl_vec_length(args));
+
+            shsl_ref datum = shsl_ref_add(shsl_vec_get(args, 0));
+            shsl_ref_drop(args);
+
+            if(!shsl_is_map(datum))
+                return shsl_mkerr
+                    (shsl_kwmap_fromelts(":called-kw", fn, ":call-datum", datum),
+                     "in a keyword invocation like (:<keword> arg), the one "
+                     "arg should be of type map, keyword %s invoked with datum "
+                     "of invalid type %s",
+                     shsl_sym_name(fn), shsl_stringify_ref_type(datum));
+
+            return shsl_map_get(datum, fn);
+        }
         default:
             shsl_ref_drop(args);
             return shsl_mkerr(fn, "object is not callable!"); 
@@ -4404,6 +4594,31 @@ shsl_defun(shsl_builtin_gensym, "gensym", args, env, {
         return shsl_mkerr(sym, "could not generate symbol, ran out of tries");
     })
 
+shsl_defun(shsl_builtin_log_level, "log-level", args, env, {
+        (void)env;
+        shsl_fn_assert_argslen(== 0);
+        return shsl_mkint(SHSL_GLOBAL_LOG_LEVEL);
+    })
+
+shsl_defun(shsl_builtin_set_log_level, "set-log-level!", args, env, {
+        (void)env;
+        shsl_fn_assert_argslen(== 1);
+        shsl_fn_assert_argtype(0, SHSL_INT);
+        int new_log_level = shsl_int(shsl_fn_arg(0));
+        switch(new_log_level) {
+        case SHSL_LOG_LEVEL_INFO:
+        case SHSL_LOG_LEVEL_WARNING:
+        case SHSL_LOG_LEVEL_ERROR:
+        case SHSL_LOG_LEVEL_NONE:
+            SHSL_GLOBAL_LOG_LEVEL = new_log_level;
+            return shsl_ref_to_nil();
+        default:
+            return shsl_mkerr
+                (shsl_fn_arg(0),
+                 "set-log-level!: invalid log level, can't set this");
+        }
+    })
+
 // environment creation
 shsl_ref shsl_env_mkempty(void) {
     return shsl_mkcons(shsl_mkmap(20), // arbitrary initial size
@@ -4543,6 +4758,17 @@ shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
     // error functions
     shsl_env_def(env, shsl_mksym("err"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_err));
+
+    // logging functions (and constants)
+    shsl_env_def(env, shsl_mksym("log-level-info"), shsl_mkint(1));
+    shsl_env_def(env, shsl_mksym("log-level-warning"), shsl_mkint(2));
+    shsl_env_def(env, shsl_mksym("log-level-error"), shsl_mkint(3));
+    shsl_env_def(env, shsl_mksym("log-level-none"), shsl_mkint(10));
+
+    shsl_env_def(env, shsl_mksym("log-level"),
+                 shsl_mkbuiltin_fn(env, shsl_builtin_log_level));
+    shsl_env_def(env, shsl_mksym("set-log-level!"),
+                 shsl_mkbuiltin_fn(env, shsl_builtin_set_log_level));
 
     // miscellaneous functions
     shsl_env_def(env, shsl_mksym("="),

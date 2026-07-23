@@ -2,12 +2,6 @@
 ;; -*- mode:clojure -*-
 ;; vi: set ft=clojure:
 
-;; global data
-(def cc "clang")
-(def common-cflags ["-Wall" "-Wextra" "-Wpedantic" "-Wswitch" "-Wno-parentheses"
-                    "-Werror"
-                    "-O0" "-g3" "-ggdb"])
-
 ;; global functions
 (defn arg? [arg]
   (find argv arg))
@@ -20,11 +14,14 @@
   (println (str "[PEACE OUT] cya!"))
   (exit 0))
 
+(def log-step? (not (arg? "--no-log-step")))
+(def log-cmd? (not (arg? "--no-log-cmd")))
+
 (defn exec-or-die [name cmd]
-  (println (str "now at step: " name "..."))
-  (println (str "running command:\n" cmd))
+  (when log-step? (println (str "now at step: " name "...")))
+  (when log-cmd? (println (str "running command:\n" cmd)))
   (set status (exec-vec cmd))
-  (println (str "finished step: " name "\n"))
+  (when log-step? (println (str "finished step: " name "\n")))
   (or status (die "step exited with failure, exiting build script")))
 
 (defn exec-valgrind []
@@ -33,7 +30,24 @@
                 "--tool=memcheck" "--leak-check=full" "-s"
                 "./shsl" "./selftest.shsl"]))
 
-;; parse flags and do the things
+;; global data
+(def cc
+  (cond ((arg? "--gcc") "gcc")
+        ((arg? "--g++") "g++")
+        ((arg? "--clang") "clang")
+        ((arg? "--clang++") "clang++")
+        ((arg? "--mingw") "x86_64-w64-mingw32-gcc")
+        ((arg? "--mingw++") "x86_64-w64-mingw32-g++")
+        (t "gcc")))
+
+(def common-cflags
+  (vec-cat
+   ["-Wall" "-Wextra" "-Wpedantic" "-Wswitch" "-Wno-parentheses" "-Werror"]
+   (cond ((arg? "--release") ["-02" "-g"])
+         ((arg? "--debug") ["-O0" "-g3" "-ggdb"])
+         (t ["-O0" "-g3" "-ggdb"]))))
+
+;; and here's the bit where we do shit
 (if (arg? "--valgrind-only")
   (do (exec-valgrind) (peace-out)))
 
@@ -41,11 +55,12 @@
              (vec-cat
               [cc]
               common-cflags
-              ["-DSHSL_LOG_ERROR" "-DSHSL_LOG_ERROR_EXPR"]
+              ["-DSHSL_LOG_ERROR_EXPR"]
               ["-o" "shsl" "shsl.c"]))
 
 (if (arg? "--compile-only")
   (peace-out))
+
 (if (arg? "--valgrind")
   (do (exec-valgrind)
       (if (arg? "--stop-at-valgrind") (peace-out))))
@@ -68,7 +83,7 @@
               [cc]
               common-cflags
               ["-DSHSL_LOG_ERROR" "-DSHSL_LOG_ERROR_EXPR"]
-              ;; ["-DSHSL_LOG_TESTS"]
+              (if (arg? "--test-logging") ["-DSHSL_LOG_TESTS"] [])
               ["-o" "tests" "tests.c"]))
 
 (exec-or-die "running library tests"

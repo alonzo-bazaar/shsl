@@ -29,7 +29,6 @@ bool streq(const char* s1, const char* s2) {
 bool sym_eq(const char* s, shsl_ref ref) {
     return shsl_is_sym(ref) && streq(s, shsl_sym_name(ref));
 }
-
 bool int_eq(long i, shsl_ref ref) {
     return shsl_is_int(ref) && shsl_int(ref) == i;
 }
@@ -83,7 +82,11 @@ void test_map_builder(void) {
     shsl_cb_add(&cb1, shsl_mkstr("this map is supposed to fail"));
     shsl_cb_add(&cb1, shsl_mkstr("if you see the error it's ok"));
     shsl_cb_add(&cb1, shsl_mkint(3));
+
+    shsl_mute_logging();
     shsl_ref err = shsl_cb_get(cb1);
+    shsl_unmute_logging();
+
     assert(shsl_is_err(err)
 	   && "erroneous map construction did not return error!");
     shsl_free(err);
@@ -143,8 +146,11 @@ void test_collection_literals(void) {
 
 // test error generation
 void test_error(void) {
+    shsl_mute_logging();
     shsl_ref s = shsl_mkerr(shsl_ref_to_nil(), "%s",
 			    "test error generation");
+    shsl_unmute_logging();
+
     assert(streq(s.ptr->err.msg.ptr->str, "test error generation"));
     shsl_free(s);
 }
@@ -167,6 +173,20 @@ void test_some_shit(void) {
     shsl_free(c);
 }
 
+void test_logging(void) {
+    shsl_mute_logging();
+    assert(shsl_should_log(SHSL_LOG_LEVEL_INFO) == false);
+    assert(shsl_should_log(SHSL_LOG_LEVEL_WARNING) == false);
+    assert(shsl_should_log(SHSL_LOG_LEVEL_ERROR) == false);
+    assert(shsl_should_log(SHSL_LOG_LEVEL_FATAL) == false);
+
+    shsl_unmute_logging();
+    assert(shsl_should_log(SHSL_LOG_LEVEL_INFO) == true);
+    assert(shsl_should_log(SHSL_LOG_LEVEL_WARNING) == true);
+    assert(shsl_should_log(SHSL_LOG_LEVEL_ERROR) == true);
+    assert(shsl_should_log(SHSL_LOG_LEVEL_FATAL) == true);
+}
+
 int main(int argc, char** argv) {
     (void)argc;
     (void)argv;
@@ -176,6 +196,7 @@ int main(int argc, char** argv) {
     SHSL_TEST(test_collection_builders());
     SHSL_TEST(test_collection_literals());
     SHSL_TEST(test_error());
+    SHSL_TEST(test_logging());
     puts("IF YOU SEE THIS AND NOTHING BLEW UP ALL TESTS PASS!");
     // TODO: make logging flag runtime thing so I can disable it for
     // error generation tests
