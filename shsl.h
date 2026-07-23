@@ -324,10 +324,12 @@ shsl_ref shsl_nthcdr(shsl_ref ref, size_t n);
 shsl_ref shsl_nth(shsl_ref list_ref, size_t n);
 // ssize_t so we can use -1 as "bro what the fuck is this object"
 ssize_t shsl_list_length(shsl_ref list_ref);
-char* shsl_sym_name(shsl_ref sym_ref);
 
+/// CONVENIENCE GETTERS DECLARATIONS
 long shsl_int(shsl_ref ref);
 double shsl_real(shsl_ref ref);
+const char* shsl_sym_name(shsl_ref sym_ref);
+bool shsl_sym_is_kword(shsl_ref sym);
 
 /// FUNCTION OPERATIONS DECLARATIONS
 // we have 4 different function types so it's easier to have separate functions
@@ -1643,10 +1645,8 @@ ssize_t shsl_list_length(shsl_ref list_ref) {
 	}
     }
 }
-char* shsl_sym_name(shsl_ref sym_ref) {
-    // TODO: copy
-    return sym_ref.ptr->sym.name.ptr->str;
-}
+
+/// CONVENIENCE GETTERS DEFINITIONS
 long shsl_int(shsl_ref ref) {
     assert(shsl_type(ref) == SHSL_INT);
     return ref.ptr->i;
@@ -1654,6 +1654,13 @@ long shsl_int(shsl_ref ref) {
 double shsl_real(shsl_ref ref) {
     assert(shsl_is_int(ref) || shsl_is_real(ref));
     return shsl_is_int(ref)?(double)ref.ptr->i:ref.ptr->r;
+}
+const char* shsl_sym_name(shsl_ref sym_ref) {
+    return sym_ref.ptr->sym.name.ptr->str;
+}
+bool shsl_sym_is_kword(shsl_ref sym) {
+    assert(shsl_is_sym(sym));
+    return shsl_sym_name(sym)[0] == ':';
 }
 
 /// FUNCTION OPERATIONS DEFINITIONS
@@ -2273,7 +2280,6 @@ void shsl_free_expr_arr(shsl_expr** arr, size_t len) {
 //  and shit, calling macroexpand on expression would be a royal pain in the
 //  ass, I tried))
 shsl_expr* shsl_form_to_expr(shsl_ref form, shsl_ref env) {
-
     switch(form.ptr->type) {
     case SHSL_INT:
     case SHSL_REAL:
@@ -2283,8 +2289,14 @@ shsl_expr* shsl_form_to_expr(shsl_ref form, shsl_ref env) {
                             .literal = shsl_ref_add(form));
 
     case SHSL_SYM:
-        return_mallocd_expr(.type = SHSL_EXPR_LOOKUP,
-                            .lookup_symbol = shsl_ref_add(form));
+        if(shsl_sym_is_kword(form))
+            // keywords are self evaluating
+            return_mallocd_expr(.type = SHSL_EXPR_LITERAL,
+                                .literal = shsl_ref_add(form));
+        else
+            // non keyword symbols shall be evaluated as lookups
+            return_mallocd_expr(.type = SHSL_EXPR_LOOKUP,
+                                .lookup_symbol = shsl_ref_add(form));
 
     case SHSL_VEC: {
         shsl_expr** elt_exprs = (shsl_expr**)calloc(shsl_vec_length(form),
@@ -2368,7 +2380,7 @@ shsl_expr* shsl_form_to_expr(shsl_ref form, shsl_ref env) {
         size_t form_length = (size_t)shsl_list_length(form);
 
         if(form.ptr->cons.car.ptr->type == SHSL_SYM) {
-            char* s = shsl_sym_name(shsl_car(form));
+            const char* s = shsl_sym_name(shsl_car(form));
             if(strcmp(s, "quote") == 0) {
                 if(form_length != 2)
                     return
