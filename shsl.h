@@ -10,6 +10,15 @@
 #ifndef SHSL_H
 #define SHSL_H
 
+// https://stackoverflow.com/questions/7063303/macro-unix-not-defined-in-macos-x
+// https://web.archive.org/web/20160306052035/http://nadeausoftware.com/articles/2012/01/c_c_tip_how_use_compiler_predefined_macros_detect_operating_system
+#if defined(unix) || defined(__unix__) || defined(__unix) || defined(__linux__)
+#define SHSL_UNIX
+#endif
+#if defined(_WIN32)
+#define SHSL_WIN32
+#endif
+
 #include<stdio.h>
 #include<stdlib.h>
 #include<stdbool.h>
@@ -20,9 +29,10 @@
 #include<assert.h>
 #include<errno.h>
 
-// for fork/exec (to be moved to shsl_exec.h when the time comes)
-#include<unistd.h>
-#include<sys/wait.h>
+#ifdef SHSL_INCLUDE_SHSL_EXEC
+#include "shsl_exec.h"
+#endif
+
 
 //// DUMB UTILITIES DECLARATIONS
 //// ----------------------------------------------------------------------------
@@ -118,6 +128,7 @@ char* shsl_append_chars_n(const char* s, size_t n, ...);
 bool is_escape_char(const char c);
 bool does_char_escape(const char c);
 char escape_to_escaped(const char c);
+bool shsl_string_ends_with(const char* str, const char* suf);
 
 // more or less
 // https://doc.rust-lang.org/std/primitive.never.html 
@@ -783,6 +794,23 @@ char escape_to_escaped(const char c) {
     case '0': return '\0';
     default: assert(0 && "unreachable");
     }
+}
+bool shsl_string_ends_with(const char* str, const char* suf) {
+    size_t str_len = strlen(str);
+    size_t suf_len = strlen(suf);
+    if(suf_len >= str_len)
+        return false;
+
+    // iterate both strings backwards from the end
+    // return false at the first mismatch you find
+    for(const char *str_i = str + str_len - 1, *suf_i = suf + suf_len - 1;
+        str_i >= str && suf_i >= suf;
+        str_i--, suf_i--)
+        if(*str_i != *suf_i)
+            return false;
+
+    // if no mismatch found, return true
+    return true;
 }
 // take character and return representation of that
 // character as when dumping to string
