@@ -9,3 +9,14 @@ TAGS
 # gdb&Co. shit
 *.h.gch
 vgcore.*
+
+# gcov files
+# initial list of extensions taken from wikipedia
+# https://en.wikipedia.org/wiki/Gcov#Description
+*.bb
+*.bbg
+*.da
+*.gcov
+# additional shit that popped up while gcov was running
+*.gcno
+*.gcda

@@ -2,7 +2,7 @@
 ;; -*- mode:clojure -*-
 ;; vi: set ft=clojure:
 
-;; global functions
+;; basic utils and shit
 (defn arg? [arg]
   (find argv arg))
 
@@ -24,13 +24,7 @@
   (when log-step? (println (str "finished step: " name "\n")))
   (or status (die "step exited with failure, exiting build script")))
 
-(defn exec-valgrind []
-  (exec-or-die "running self tests under valgrind"
-               ["valgrind"
-                "--tool=memcheck" "--leak-check=full" "-s"
-                "./shsl" "./selftest.shsl"]))
-
-;; global data
+;; global data used by the various build steps
 (def cc
   (cond ((arg? "--gcc") "gcc")
         ((arg? "--g++") "g++")
@@ -41,52 +35,96 @@
         (t "gcc")))
 
 (def common-cflags
-  (vec-cat
-   ["-Wall" "-Wextra" "-Wpedantic" "-Wswitch" "-Wno-parentheses" "-Werror"]
-   (cond ((arg? "--release") ["-02" "-g"])
-         ((arg? "--debug") ["-O0" "-g3" "-ggdb"])
-         (t ["-O0" "-g3" "-ggdb"]))))
+  (let [warnings
+        ["-Wall" "-Wextra" "-Wpedantic" "-Wswitch" "-Wno-parentheses" "-Werror"]
+        debug-flags
+        (vec-cat ["-O0" "-g3" "-ggdb"]
+                 (if (= cc "gcc")
+                   ["--coverage" "-fprofile-arcs" "-ftest-coverage"] []))
+        release-flags
+        ["-02" "-g"]]
+    (vec-cat
+     warnings
+     (if (arg? "--release") release-flags debug-flags))))
 
-;; and here's the bit where we do shit
-(if (arg? "--valgrind-only")
-  (do (exec-valgrind) (peace-out)))
+;; defn's for the various build steps
+(defn compile-exe []
+  (exec-or-die "deleting artefacts of previous compilation"
+               ["rm" "-f"
+                ;; executables
+                "shsl" "test"
+                ;; gcov compilation shit
+                "shsl.gcda" "shsl.gcno"])
 
-(exec-or-die "compiling shsl executable"
-             (vec-cat
-              [cc]
-              common-cflags
-              ["-DSHSL_LOG_ERROR_EXPR"]
-              ["-o" "shsl" "shsl.c"]))
+  (exec-or-die "compiling shsl executable"
+               (vec-cat
+                [cc]
+                common-cflags
+                ["-DSHSL_LOG_ERROR_EXPR"]
+                ["-o" "shsl" "shsl.c"])))
 
-(if (arg? "--compile-only")
-  (peace-out))
+(defn run-self-tests []
+  (exec-or-die "running self tests"
+               ["./shsl" "-f" "./selftest.shsl"]))
 
-(if (arg? "--valgrind")
-  (do (exec-valgrind)
-      (if (arg? "--stop-at-valgrind") (peace-out))))
+(defn run-shell-tests []
+  (exec-or-die "running shell tests"
+               ["./test.sh"]))
 
-(exec-or-die "running self tests"
-             ["./selftest.shsl"])
+(defn compile-library-tests []
+  (exec-or-die "compiling library tests"
+               (vec-cat
+                [cc]
+                common-cflags
+                ["-DSHSL_LOG_ERROR" "-DSHSL_LOG_ERROR_EXPR"]
+                (if (arg? "--test-logging") ["-DSHSL_LOG_TESTS"] [])
+                ["-o" "test" "test.c"])))
 
-(if (arg? "--stop-at-self-test")
-  (peace-out))
+(defn run-library-tests []
+  (exec-or-die "running library tests"
+               ["./test"]))
 
-(exec-or-die "running shell tests"
-             ["./test.sh"])
+(defn run-valgrind-tests []
+  (exec-or-die "running self tests under valgrind"
+               ["valgrind"
+                "--tool=memcheck" "--leak-check=full" "-s"
+                "./shsl" "./selftest.shsl"]))
 
-(if (or (arg? "--stop-at-shell-test")
-        (arg? "--no-library-test"))
-  (peace-out))
+(defn run-gcov-tests []
+  ;; if previous gcov files already exist gcov will just add the current run's
+  ;; results onto the pre-existing file results
+  ;; this will be useful later but as of now I don't really want this behaviour
+  (exec-or-die "deleting results of last gcov run"
+               ["rm" "-f"
+                "shsl.c.gcov" "shsl.h.gcov"])
+  (exec-or-die "running self tests to collect gcov-data"
+               ["./shsl" "-f" "./selftest.shsl"])
+  (exec-or-die "printing coverage information"
+               ["gcov" "shsl.c"]))
 
-(exec-or-die "compiling library tests"
-             (vec-cat
-              [cc]
-              common-cflags
-              ["-DSHSL_LOG_ERROR" "-DSHSL_LOG_ERROR_EXPR"]
-              (if (arg? "--test-logging") ["-DSHSL_LOG_TESTS"] [])
-              ["-o" "tests" "tests.c"]))
+(defn main []
+  (cond ((arg? "--compile-only")
+         (compile-exe))
 
-(exec-or-die "running library tests"
-             ["./tests"])
+        ((arg? "--valgrind-only")
+         (run-valgrind-tests))
+        ((arg? "--valgrind-run")
+         (compile-exe)
+         (run-valgrind-tests))
 
+        ((arg? "--gcov-only")
+         (run-gcov-tests))
+        ;; TBD: to be debugged
+        ;; ((arg? "--gcov-run")
+        ;;  (compile-exe)
+        ;;  (run-gcov-tests))
+
+        (t
+         (compile-exe)
+         (run-self-tests)
+         (run-shell-tests)
+         (compile-library-tests)
+         (run-library-tests))))
+
+(main)
 (println "if none of the above aborted we're all good")

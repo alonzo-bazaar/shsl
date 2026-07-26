@@ -4620,6 +4620,20 @@ shsl_defun(shsl_builtin_set_log_level, "set-log-level!", args, env, {
         }
     })
 
+shsl_defun(shsl_builtin_log, "log", args, env, {
+        (void) env;
+        shsl_fn_assert_argslen(==2);
+        shsl_fn_assert_argtype(0, SHSL_INT);
+        shsl_fn_assert_argtype(1, SHSL_STR);
+        int log_level = shsl_int(shsl_fn_arg(0));
+        const char* what = shsl_fn_arg(1).ptr->str;
+        
+        FILE* s = log_level==SHSL_LOG_LEVEL_INFO?stdout:stderr;
+        shsl_log(s, log_level, what); putc('\n', s);
+        return shsl_ref_to_nil();
+    })
+
+
 // environment creation
 shsl_ref shsl_env_mkempty(void) {
     return shsl_mkcons(shsl_mkmap(20), // arbitrary initial size

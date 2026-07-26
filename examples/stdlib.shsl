@@ -2,7 +2,13 @@
 ;; -*- mode:clojurescript -*-
 ;; vi: set ft=clojure:
 
-;; some basics we're just gonna need
+;; this isn't an example per se, it's the file I use when editing the shsl
+;; standard library before baking it into shsl.h as a big fucking string
+;; but you can see a fair bit of how shsl does things
+;; and how, at least in here, it builds itself from little to no useful features
+;; to kinda some useful features features
+
+;; some absolutely basics we're just gonna need
 (def defmacro
   (macro [name args & body]
          (cons 'def
@@ -117,16 +123,6 @@
          (str-find haystack needle))
         (t (err "find: unrecognized haystack type"
                 [needle haystack]))))
-
-(defmacro with-log-level [body-ll & body]
-  (let [old-ll-sym (gensym "old-log-level")
-        body-res-sym (gensym "body-res")]
-    (let-code [old-ll-sym '(log-level)]
-      (list 'do
-            (list 'set-log-level! body-ll)
-            (set-code body-res-sym (do-code (vec->list body)))
-            (list 'set-log-level! old-ll-sym)
-            body-res-sym))))
 
 (defmacro with-log-level [body-ll & body]
   (let [old-ll-sym (gensym "old-log-level")
