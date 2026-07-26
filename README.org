@@ -182,8 +182,9 @@ The following is a [[https://learnxinyminutes.com/][learnxinyminutes]] style run
 * TODO's and the like
 - [X] get language to a usable state
 - [ ] fix leaks when lexer or parser return an error
-- [X] tests
-- [ ] but like, a looooot of tests
+- [-] tests
+  - [X] lotsa of tests
+  - [ ] but like, loooooootsa of tests
 - [ ] better documentation
 - [ ] CFFI through a ctypes like library
   - may incur in a dependency on libffi, put behind a macro to allow for shsl to be compiled without the dependancy as well
@@ -191,7 +192,7 @@ The following is a [[https://learnxinyminutes.com/][learnxinyminutes]] style run
   - [X] ~exec~ function for posix and win32
   - [-] ~exec-parallel~ functions for posix and win32
   - [-] ~exec-pipeline~ functions for posix and win32
-  - [-] ~exec-str~ functions for posix and win32
+  - [-] ~exec-into-str~ functions for posix and win32
 - [ ] an ~execasync~ function for scripting
 - [ ] a filesystem library for scripting
 - [ ] proper hash maps instead of using a sequential vector of key/value pairs
@@ -199,9 +200,9 @@ The following is a [[https://learnxinyminutes.com/][learnxinyminutes]] style run
 - [ ] support for more memory management schemas
   - [ ] implement mark and sweep and have an interface that can accomodate mark and sweep
   - [ ] (optionally) integrate ~libgc~ and have an interface that can accomodate taht as well (behind a preprocessor flag as it would otherwise incur in a mandatory dependency)
-- [ ] support for lisp macros
-- [ ] test on windows (will likely be done through mingw and wine)
+- [X] support for lisp macros
+- [ ] test on windows (likely to be done through mingw and wine)
 - [ ] keyword arguments
-- [ ] variadics
+- [X] variadics
 
 * Similar projects
