@@ -1,12 +1,18 @@
 # compilation output
 shsl
-tests
+test
 a.out
+
+# precompiled headers
+*.pch
 
 # emacs shit
 TAGS
 
-# gdb&Co. shit
+# trial and error/wip files
+tryshit.c
+
+# I'm assuming this is gdb shit I don't know where these files came from
 *.h.gch
 vgcore.*
 
@@ -17,6 +23,7 @@ vgcore.*
 *.bbg
 *.da
 *.gcov
-# additional shit that popped up while gcov was running
+
+# additional shit that popped up while compiling and running with gcov
 *.gcno
 *.gcda

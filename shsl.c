@@ -30,8 +30,8 @@
 #define SHSL_IMPLEMENTATION
 #include "shsl.h"
 
-// #define SHSL_EXEC_IMPLEMENTATION
-// #include "shsl_exec.h"
+#define SHSL_EXEC_IMPLEMENTATION
+#include "shsl_exec.h"
 
 // #define SHSL_FS_IMPLEMENTATION
 // #include "shsl_fs.h"
@@ -39,17 +39,38 @@
 #define ARGS_SHIFT(argc, argv) do { argv++; argc--; } while(0)
 #define ARGS_SHIFT_BY(argc, argv, n) do { argv+=n; argc-=n; } while(0)
 
-int main(int argc, char** argv) {
+shsl_ref shsl_env_apparecchiato(void) {
     shsl_ref env = shsl_ref_add(shsl_env_mkempty());
-    shsl_env_add_initial_definitions(env);
-    shsl_env_eval_stdlib(env);
-    // shsl_add_exec_defs(env);
-    // shsl_add_fs_defs(env);
 
+    shsl_env_add_initial_definitions(env); // initial stdlib functions
+                                           // written in c and bound to env
+    shsl_env_eval_stdlib(env);             // some additional standard functions
+                                           // et al. written in shsl instead,
+                                           // since it was far easier to write em
+                                           // in shsl  
+
+    // same division has been applied to other builtin modules as well
+    shsl_env_add_exec_defs(env);
+    shsl_env_eval_execlib(env);
+
+    return env;
+}
+
+int main(int argc, char** argv) {
+    // get a ref to the env we're gonna run with
+    shsl_ref env = shsl_env_apparecchiato();
+
+    // shsl_main() requires a progname to be provided separate from the argv 
     const char* shsl_program_name = argv[0];
     ARGS_SHIFT(argc, argv);
+
+    // call shsl_main() and get a return value
     int ret = shsl_main(env, shsl_program_name, argc, argv);
+
+    // after acquiring env drop ref to it
+    // or just free it I don't care
     shsl_ref_drop(env);
-    // shsl_free(env);
+
+    // return whatever shsl_main() returned
     return ret;
 }

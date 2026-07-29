@@ -1,8 +1,9 @@
-#include "shsl.h"
+#ifndef SHSL_H
+#error "shsl_exec.h should be included after shsl.h"
+#endif
 
 #ifndef SHSL_EXEC_H
 #define SHSL_EXEC_H
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -28,8 +29,20 @@ extern "C" {
 #endif
 
 // common api between unix and win32 versions of shsl_exec
+// shsl facing api
 int shsl_exec(int argc, char** argv);
 int shsl_exec_into_str(int argc, char** argv, char** outp, char** errp);
+
+// shsl builtins made from the above (and subroutines thereof)
+shsl_ref shsl_fn_assert_arg_strvec(const char* caller, shsl_ref arg);
+void shsl_strvec_to_argc_argv(shsl_ref strvec, int* argc_ptr, char*** argv_ptr);
+
+shsl_ref shsl_builtin_exec_vec(shsl_ref args, shsl_ref env);
+shsl_ref shsl_builtin_exec_vec_strs(shsl_ref args, shsl_ref env);
+
+// user facing api
+shsl_ref shsl_env_add_exec_definitions(shsl_ref env);
+shsl_ref shsl_env_eval_execlib(shsl_ref env);
 
 #define shsl_log_errno()                                                \
     fprintf(stderr, "at line %d of file %s\n"                           \
@@ -40,7 +53,7 @@ int shsl_exec_into_str(int argc, char** argv, char** outp, char** errp);
 // 'cause I end up always writing the same error reporting code for every posix
 // call I have to invoke so might as well make it reusable
 #define SHSL_SYSCALL_WARN_ON_FAIL(...) \
-    shsl_syscall_warn(__VA_ARGS__, #call, __LINE__, __FILE__)
+    shsl_syscall_warn(__VA_ARGS__, #__VA_ARGS__, __LINE__, __FILE__)
 int shsl_syscall_warn(int call_ret, const char* callexpr,
                       int linenum, const char* filename);
 
@@ -52,10 +65,10 @@ int shsl_syscall_warn(int call_ret, const char* callexpr,
 // as posix call, meaning I can reuse my posix targeting error reporting wrappers
 #define SHSL_EXEC(...) \
     SHSL_SYSCALL_WARN_ON_FAIL(shsl_exec(__VA_ARGS__))
-#define SHSL_INTO_STR(...) \
+#define SHSL_EXEC_INTO_STR(...) \
     SHSL_SYSCALL_WARN_ON_FAIL(shsl_exec_into_str(__VA_ARGS__))
 
-#ifdef SHSL_UNIX
+#if defined(SHSL_UNIX)
 // unix specific helper functions for shsl_exec
 pid_t shsl_spawn(int argc, char** argv);
 
@@ -80,7 +93,7 @@ int shsl_grab_stderr_from_pipe(int pipe[2]); // bind stderr to write end of pipe
 #define SHSL_READ(...)    SHSL_SYSCALL_WARN_ON_FAIL(read(__VA_ARGS__))
 void SHSL_EXECVP(char** argv) {
     SHSL_SYSCALL_WARN_ON_FAIL(execvp(*argv, argv));
-    shsl_die(1, "royally fucked some shit up, "
+    shsl_die(EXIT_FAILURE, "royally fucked some shit up, "
              "child process somehow returned from execvp call");
 }
 
@@ -88,11 +101,11 @@ void SHSL_EXECVP(char** argv) {
 #define SHSL_CLOSE_PIPE(...) \
     SHSL_SYSCALL_WARN_ON_FAIL(shsl_close_pipe(__VA_ARGS__));
 #define SHSL_GRAB_STDIN_FROM_PIPE(...)  \
-    SHSL_SYSCALL_WARN_ON_FAIL(shsl_grab_stdin_from_pipe(__VA_ARGS__));
+    SHSL_SYSCALL_WARN_ON_FAIL(shsl_grab_stdin_from_pipe(__VA_ARGS__))
 #define SHSL_GRAB_STDOUT_FROM_PIPE(...) \
-    SHSL_SYSCALL_WARN_ON_FAIL(shsl_grab_stdout_from_pipe(__VA_ARGS__));
+    SHSL_SYSCALL_WARN_ON_FAIL(shsl_grab_stdout_from_pipe(__VA_ARGS__))
 #define SHSL_GRAB_STDERR_FROM_PIPE(...) \
-    SHSL_SYSCALL_WARN_ON_FAIL(shsl_grab_stderr_from_pipe(__VA_ARGS__));
+    SHSL_SYSCALL_WARN_ON_FAIL(shsl_grab_stderr_from_pipe(__VA_ARGS__))
 
 #elif defined(SHSL_WIN32)
 // win32 specific helper functions for shsl_exec 
@@ -102,16 +115,15 @@ void shsl_sb_win32_escaped_push(shsl_string_builder* sb, char c, bool cmd_exe);
 void shsl_cmd_push_quoted_win32_arg(const char* arg, shsl_string_builder* sb,
                                     bool cmd_exe);
 char* shsl_cmd_to_win32_str(int argc, char** argv, bool cmd_exe);
-
-#endif // SHSL_UNIX
-
 #ifdef __cplusplus
 }
 #endif
+#endif // defined(SHSL_UNIX)
 #endif // SHSL_EXEC_H
 
 #ifdef SHSL_EXEC_IMPLEMENTATION
-#ifdef SHSL_UNIX
+// this is mostly posix specific but we use it a bit for the common api
+// so it's defined outside of any system specific ifdef
 int shsl_syscall_warn(int call_ret, const char* callexpr,
                       int linenum, const char* filename) {
     if(call_ret == -1) {
@@ -123,6 +135,8 @@ int shsl_syscall_warn(int call_ret, const char* callexpr,
     return call_ret;
 }
 
+// implmentation of the unix specific shit
+#if defined(SHSL_UNIX)
 pid_t shsl_spawn(int argc, char** argv) {
     if(argc == 0)
         return -1;
@@ -136,8 +150,10 @@ pid_t shsl_spawn(int argc, char** argv) {
         return -1;
     else if(pid != 0) // parent branch, child created succesfully
         return pid;
-    else              // child branch
+    else {            // child branch
         SHSL_EXECVP(argv);
+        exit(EXIT_FAILURE);
+    }
 }
 
 // runs one command and blocks until command is done
@@ -155,22 +171,22 @@ int shsl_exec(int argc, char** argv) {
 }
 
 int shsl_close_pipe(int pipe[2]) {
-    int c1 = SHSL_CLOSE(pipe_read_end(pipe));
-    int c2 = SHSL_CLOSE(pipe_write_end(pipe)); 
+    int c1 = SHSL_CLOSE(shsl_pipe_read_end(pipe));
+    int c2 = SHSL_CLOSE(shsl_pipe_write_end(pipe)); 
     return (c1 == -1 || c2 == -1)?-1:0;
 }
 int shsl_grab_stdin_from_pipe(int pipe[2]) {
-    int c = SHSL_DUP2(pipe_read_end(pipe), STDIN_FILENO);
+    int c = SHSL_DUP2(shsl_pipe_read_end(pipe), STDIN_FILENO);
     int d = SHSL_CLOSE_PIPE(pipe);
     return (d == -1 || c == -1)?-1:0;
 }
 int shsl_grab_stdout_from_pipe(int pipe[2]) {
-    int d = SHSL_DUP2(pipe_write_end(pipe), STDOUT_FILENO);
+    int d = SHSL_DUP2(shsl_pipe_write_end(pipe), STDOUT_FILENO);
     int c = SHSL_CLOSE_PIPE(pipe);
     return (d == -1 || c == -1)?-1:0;
 }
 int shsl_grab_stderr_from_pipe(int pipe[2]) {
-    int d = SHSL_DUP2(pipe_write_end(pipe), STDERR_FILENO);
+    int d = SHSL_DUP2(shsl_pipe_write_end(pipe), STDERR_FILENO);
     int c = SHSL_CLOSE_PIPE(pipe);
     return (d == -1 || c == -1)?-1:0;
 }
@@ -196,21 +212,21 @@ int shsl_exec_into_str(int argc, char** argv, char** outp, char** errp) {
     if(kid == -1)
         goto end;
     if(kid == 0) {
-        if(SHSL_GRAB_STDOUT_FROM_PIPE(p) == -1)
-            shsl_die("child failed to bind stdout to pipe output\n");
-        if(SHSL_GRAB_STDERR_FROM_PIPE(p) == -1)
-            shsl_die("child failed to bind stderr to pipe output\n");
+        if(SHSL_GRAB_STDOUT_FROM_PIPE(out_p) == -1)
+            shsl_die(EXIT_FAILURE, "child failed to bind stdout to pipe output\n");
+        if(SHSL_GRAB_STDERR_FROM_PIPE(err_p) == -1)
+            shsl_die(EXIT_FAILURE, "child failed to bind stderr to pipe output\n");
         SHSL_EXECVP(argv);
     }
     else {
-        if(SHSL_CLOSE(pipe_write_end(out_p)) == -1) {
-            SHSL_CLOSE(pipe_read_end(put_p));
+        if(SHSL_CLOSE(shsl_pipe_write_end(out_p)) == -1) {
+            SHSL_CLOSE(shsl_pipe_read_end(out_p));
             SHSL_CLOSE_PIPE(err_p);
             shsl_log_err("error in parent while closing child stdout pipe");
             goto end;
         }
-        if(SHSL_CLOSE(pipe_write_end(err_p)) == -1) {
-            SHSL_CLOSE(pipe_read_end(err_p));
+        if(SHSL_CLOSE(shsl_pipe_write_end(err_p)) == -1) {
+            SHSL_CLOSE(shsl_pipe_read_end(err_p));
             shsl_log_err("error in parent while closing child stdout pipe");
             goto end;
         }
@@ -228,7 +244,7 @@ int shsl_exec_into_str(int argc, char** argv, char** outp, char** errp) {
         for(s = SHSL_READ(out_pr, buf, 1024);
             s>0;
             s = SHSL_READ(out_pr, buf, 1024))
-            shsl_sb_push_sized_str(out_sb, buf, (size_t)s);
+            shsl_sb_push_sized_str(&out_sb, buf, (size_t)s);
 
         if(s==-1) {
             shsl_log_err("failure while reading child standard output");
@@ -243,7 +259,7 @@ int shsl_exec_into_str(int argc, char** argv, char** outp, char** errp) {
         for(s = SHSL_READ(err_pr, buf, 1024);
             s>0;
             s = SHSL_READ(err_pr, buf, 1024))
-            shsl_sb_push_sized_str(err_sb, buf, (size_t)s);
+            shsl_sb_push_sized_str(&err_sb, buf, (size_t)s);
 
         if(s==-1) {
             shsl_log_err("failure while reading child standard error");
@@ -257,8 +273,8 @@ int shsl_exec_into_str(int argc, char** argv, char** outp, char** errp) {
 
         SHSL_CLOSE(out_pr);
         SHSL_CLOSE(err_pr);
-        shsl_sb_push(out_sb, '\0');
-        shsl_sb_push(err_sb, '\0');
+        shsl_sb_push(&out_sb, '\0');
+        shsl_sb_push(&err_sb, '\0');
         *outp = shsl_sb_get(&out_sb);
         *errp = shsl_sb_get(&err_sb);
         ret = 0;
@@ -269,6 +285,7 @@ int shsl_exec_into_str(int argc, char** argv, char** outp, char** errp) {
     return ret;
 }
 
+// implmentation of the win32 specific shit
 #elif defined(SHSL_WIN32)
 // https://learn.microsoft.com/en-gb/archive/blogs/twistylittlepassagesallalike/everyone-quotes-command-line-arguments-the-wrong-way
 // https://github.com/tsoding/nob.h/blob/0a08926d8094fc4ae678155c5d73ae21d1f96f3f/nob.h#L1182
@@ -482,6 +499,110 @@ int shsl_exec(int argc, char** argv) {
 char* shsl_exec_into_str(int argc, char** argv) {
     assert(0 && "TODO");
 }
+#endif // defined(SHSL_UNIX)
 
-#endif // SHSL_WIN32
+// and now that, one way or the other, shsl_exec&Co. have been implemnted, we can
+// use them to provide an exec api to the shsl code
+shsl_ref shsl_fn_assert_cmd_strvec(const char* caller, shsl_ref arg) {
+    shsl_vec_foreach(i, elt, arg) {
+        if(!shsl_is_str(elt))
+            return shsl_mkerr
+                (shsl_kwmap_fromelts
+                 (":command-vector", arg,
+                  ":culprit", elt,
+                  ":culprit-index", shsl_mkint(i),
+                  ":culprit-type", shsl_mkstr(shsl_stringify_ref_type(arg))),
+
+                 "%s: expected all elements of the command "
+                 "to be strings, received invalid command: "
+                 "argument at index %zu of command vector is not a string",
+                 caller, (size_t)i);
+    }
+    return shsl_ref_to_nil();
+}
+
+void shsl_strvec_to_argc_argv(shsl_ref strvec, int* argc_ptr, char*** argv_ptr) {
+    int argc; char** argv;
+    argc = shsl_vec_length(strvec);
+    argv = SHSL_ARR_ALLOC(char*, argc+1);
+    shsl_vec_foreach(i, elt, strvec)
+        argv[i] = elt.ptr->str;
+    argv[argc] = NULL;
+
+    *argc_ptr = argc;
+    *argv_ptr = argv;
+}
+
+shsl_defun(shsl_builtin_exec_vec, "exec-vec", args, env, {
+        (void)env;
+        // validate
+        shsl_fn_assert_argslen(== 1);
+        shsl_fn_assert_argtype(0, SHSL_VEC);
+
+        shsl_ref invalid = shsl_fn_assert_cmd_strvec("exec-vec",
+                                                     shsl_fn_arg(0));
+        if(!shsl_is_nil(invalid))
+            return invalid;
+        
+        // create argc and argv
+        int argc; char** argv;
+        shsl_strvec_to_argc_argv(shsl_fn_arg(0), &argc, &argv);
+        int ret = shsl_exec(argc, argv);
+        free(argv);
+
+        return ret == EXIT_SUCCESS
+            ?shsl_mkint(ret)
+            :shsl_mkerr(shsl_kwmap_fromelts
+                        (":command", (shsl_vec_get(args, 0)),
+                         ":command-exit-code", shsl_mkint(ret)),
+                        "exec-vec: child process exited with failure status %d",
+                        ret);
+    })
+
+shsl_defun(shsl_builtin_exec_vec_strs, "exec-vec-strs", args, env, {
+        (void)env;
+        // most of this logic is duplicated from "exec-vec"
+        // which is... rather sadge :(
+        shsl_fn_assert_argslen(== 1);
+        shsl_fn_assert_argtype(0, SHSL_VEC);
+
+        shsl_ref invalid = shsl_fn_assert_cmd_strvec("exec-vec-strs",
+                                                     shsl_fn_arg(0));
+        if(!shsl_is_nil(invalid))
+            return invalid;
+
+        int argc; char** argv;
+        shsl_strvec_to_argc_argv(shsl_fn_arg(0), &argc, &argv);
+        char* out = NULL;
+        char* err = NULL;
+        int succ = SHSL_EXEC_INTO_STR(argc, argv, &out, &err);
+        free(argv);
+
+        if(succ < 0) {
+            if(out) free(out); 
+            if(err) free(err); 
+            return shsl_mkerr(shsl_kwmap_fromelts
+                              (":command", shsl_fn_arg(0),
+                               ":errno", shsl_mkint(errno),
+                               ":errno-msg", shsl_mkstr(strerror(errno))),
+                              "exec-vec-strs: some error occured while running "
+                              "child process");
+        }
+
+        return shsl_kwmap_fromelts(":stdout", shsl_mkstr_nocopy(out),
+                                   ":stderr", shsl_mkstr_nocopy(err));
+    })
+
+shsl_ref shsl_env_add_exec_defs(shsl_ref env) {
+    shsl_env_def(env, shsl_mksym("exec-vec"),
+                 shsl_mkbuiltin_fn(env, shsl_builtin_exec_vec));
+    shsl_env_def(env, shsl_mksym("exec-vec-strs"),
+                 shsl_mkbuiltin_fn(env, shsl_builtin_exec_vec_strs));
+    return env;
+}
+shsl_ref shsl_env_eval_execlib(shsl_ref env) {
+    shsl_eval_str("(defn eval [& args] (eval-vec args))", env);
+    shsl_eval_str("(defn eval-strs [& args] (eval-vec-strs args))", env);
+    return env;
+}
 #endif // SHSL_EXEC_IMPLEMENTATION
