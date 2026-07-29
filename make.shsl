@@ -39,7 +39,7 @@
         ["-Wall" "-Wextra" "-Wpedantic" "-Wswitch" "-Wno-parentheses" "-Werror"]
         debug-flags
         (vec-cat ["-O0" "-g3" "-ggdb"]
-                 (if (= cc "gcc")
+                 (if (and (= cc "gcc") (arg? "--coverage"))
                    ["--coverage" "-fprofile-arcs" "-ftest-coverage"] []))
         release-flags
         ["-02" "-g"]]

@@ -319,9 +319,15 @@ void shsl_map_set(shsl_ref map_obj,
 // note:
 //   in shsl we have two kinds of "shit yourself and die"
 //   - there's shsl side errors, where the error is in the shsl code, so you just
-//     return an error object, maybe log it, and the program goes on
+//     return an error object, maybe show it to the user, ask them
+//     "hey what the fuck bro", but the shsl process itself doesn't die, it just
+//     reports that some input it received was shit or that some operation it was
+//     asked to perform was shit
 //   - then there's c side errors, where some shit went horribly wrong, the error
-//     is in the c code, and the whole program just fucking aborts
+//     is in the c code, we hit some bug in the interprer itself, so the whole
+//     program just fucking aborts because we can't guarantee anything anymore,
+//     and C can be one hell of a cruel mistress if you let your errors pass
+//     silently, so it's best to just immediately hcf.
 // 
 //   these functions are meant to be used by the c code, which means
 //   they're gonna emit c side errors, a call to one of these functions means an
@@ -739,6 +745,7 @@ size_t shsl_vlog(FILE* stream, SHSL_LOG_LEVEL log_level,
                 assert(0 && "you fucked somethig up with the log level");
         }
         acc+=vfprintf(stream, fmt, args);
+        acc+=fprintf(stream, "\n");
     }
     return acc;
 }
@@ -1022,20 +1029,20 @@ shsl_ref shsl_weak_ref_from_ptr(shsl_obj* ptr) {
 shsl_ref shsl_ref_add(shsl_ref ref) {
     if(ref.is_weak) {
 #ifdef SHSL_LOG_ADD_REF
-        printf("[SHSL GC] not adding ref to object %p\n", (void*)(ref.ptr));
-        printf("[SHSL GC] "); shsl_fpr(ref, stdout); fputc('\n', stdout);
-        printf("[SHSL GC] because ref is weak\n");
-        printf("[SHSL GC] remains at refcount %d\n", ref.ptr->ref_count);
-        fputc('\n', stdout);
+        shsl_log_info("[GC] not adding ref to object %p", (void*)(ref.ptr));
+        shsl_log_info("[GC] "); shsl_fpr(ref, stdout); fputc('\n', stdout);
+        shsl_log_info("[GC] because ref is weak");
+        shsl_log_info("[GC] remains at refcount %d", ref.ptr->ref_count);
+        shsl_log_info("[GC] ");
 #endif
         return ref;
     }
 
 #ifdef SHSL_LOG_ADD_REF
-    printf("[SHSL GC] adding ref to object %p\n", (void*)(ref.ptr));
-    printf("[SHSL GC] "); shsl_fpr(ref, stdout); fputc('\n', stdout);
-    printf("[SHSL GC] was at refcount %d\n", ref.ptr->ref_count);
-    fputc('\n', stdout);
+    shsl_log_info("[GC] adding ref to object %p", (void*)(ref.ptr));
+    shsl_log_info("[GC] "); shsl_fpr(ref, stdout); fputc('', stdout);
+    shsl_log_info("[GC] was at refcount %d", ref.ptr->ref_count);
+    shsl_log_info("[GC] ");
 #endif
 
     if(shsl_type(ref) != SHSL_NIL)
@@ -1045,20 +1052,20 @@ shsl_ref shsl_ref_add(shsl_ref ref) {
 void shsl_ref_drop(shsl_ref ref) {
     if(ref.is_weak) {
 #ifdef SHSL_LOG_DEL_REF
-        printf("[SHSL GC] not deleting ref to object %p\n", (void*)(ref.ptr));
-        printf("[SHSL GC] "); shsl_fpr(ref, stdout); fputc('\n', stdout);
-        printf("[SHSL GC] because ref is weak\n");
-        printf("[SHSL GC] remains at refcount %d\n", ref.ptr->ref_count);
-        fputc('\n', stdout);
+        shsl_log_info("[GC] not deleting ref to object %p", (void*)(ref.ptr));
+        shsl_log_info("[GC] "); shsl_fpr(ref, stdout); fputc('\n', stdout);
+        shsl_log_info("[GC] because ref is weak");
+        shsl_log_info("[GC] remains at refcount %d", ref.ptr->ref_count);
+        shsl_log_info("[GC] ");
 #endif
         return;
     }
 
 #ifdef SHSL_LOG_DEL_REF
-    fprintf(stdout, "[SHSL GC] deleting ref to object %p\n", (void*)(ref.ptr));
-    fprintf(stdout, "[SHSL GC] "); shsl_fpr(ref, stdout); fputc('\n', stdout);
-    fprintf(stdout, "[SHSL GC] was at refcount %d\n", ref.ptr->ref_count);
-    fputc('\n', stdout);
+    shsl_log_info("[GC] deleting ref to object %p", (void*)(ref.ptr));
+    shsl_log_info("[GC] "); shsl_fpr(ref, stdout); fputc('\n', stdout);
+    shsl_log_info("[GC] was at refcount %d", ref.ptr->ref_count);
+    shsl_log_info("[GC] ");
 #endif    
     if(shsl_type(ref) == SHSL_NIL)
 	return;
@@ -1225,8 +1232,8 @@ shsl_ref shsl_vmkerr(shsl_ref data, const char* msg, va_list args) {
     int n = vsprintf(buf, msg, args);
 
     if(n >= 0 && shsl_should_log(SHSL_LOG_LEVEL_ERROR)) {
-        shsl_log_err("%*s\n", n, buf);
-        shsl_log_err("with data: "); shsl_fpr(data, stderr); fputc('\n', stderr);
+        shsl_log_err("%*s", n, buf);
+        shsl_log_err("with data:"); shsl_fpr(data, stderr); fputc('\n', stderr);
     }
 
     return_mallocd_obj(.ref_count = 0,
@@ -2445,10 +2452,9 @@ bool shsl_expr_is_error(shsl_expr* expr) {
 shsl_expr* shsl_vexpr_error(shsl_ref form, const char* msg, va_list args) {
     shsl_ref err = shsl_vmkerr(form, msg, args);
 #ifdef SHSL_LOG_ERROR_EXPR
-    fprintf(stderr, "[SHSL PARSER ERROR] %s\n", msg);
-    fprintf(stderr, "[SHSL PARSER ERROR] with data: ");
-    shsl_fpr(form, stderr);
-    fputc('\n', stderr);
+    shsl_log_err("[SHSL PARSER] %s", msg);
+    shsl_log_err("[SHSL PARSER] with data:");
+    shsl_fpr(form, stderr); fputc('\n', stderr);
 #endif
     return_mallocd_expr(.type = SHSL_EXPR_LITERAL,
                         .literal = err);

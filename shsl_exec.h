@@ -16,12 +16,12 @@ extern "C" {
 #include<errno.h>
 
 #if defined(SHSL_UNIX)
-#include<unistd.h>
-#include<sys/wait.h>
+#include<unistd.h>   // fork, exec, pipe &Co.
+#include<sys/wait.h> // waitpid &Co.
 #define SHSL_NL "\n"
 
 #elif defined(SHSL_WIN32)
-#include<windows.h>
+#include<windows.h>  // win32 and a lot of prayers
 #define SHSL_NL "\r\n"
 
 #else
@@ -601,8 +601,8 @@ shsl_ref shsl_env_add_exec_defs(shsl_ref env) {
     return env;
 }
 shsl_ref shsl_env_eval_execlib(shsl_ref env) {
-    shsl_eval_str("(defn eval [& args] (eval-vec args))", env);
-    shsl_eval_str("(defn eval-strs [& args] (eval-vec-strs args))", env);
+    shsl_eval_str("(defn exec [& args] (exec-vec args))", env);
+    shsl_eval_str("(defn exec-strs [& args] (exec-vec-strs args))", env);
     return env;
 }
 #endif // SHSL_EXEC_IMPLEMENTATION
