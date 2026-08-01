@@ -105,7 +105,8 @@
 (asseq nil (sym? 10)   "basic predicates")
 
 ;; advanced lambda fuckery
-(asseq 10000 (((fn [a] (fn [b] (a (a b)))) (fn [a] (* a a))) 10)
+(asseq 10000
+       (((fn [a] (fn [b] (a (a b)))) (fn [a] (* a a))) 10)
        "advanced lambda fuckery")
 
 ;; macros&Co.

@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+
+SCRIPT_DIR="$(dirname "$0")"
+SHSL_ROOT="${SCRIPT_DIR}/.."
+
+remove-local-includes () {
+    local line
+    while IFS= read -r line; do
+        if [[ "${line}" != '#include'*'"'* ]]; then
+            echo "${line}"
+        fi
+    done
+}
+
+gen_shsl_h () {
+    echo "#ifdef SHSL_IMPLEMENTATION"
+    echo "#define SHSL_EXEC_IMPLEMENTATION"
+    echo "#endif"
+    cat "${SHSL_ROOT}/shsl.h" | remove-local-includes
+    cat "${SHSL_ROOT}/shsl_exec.h" | remove-local-includes
+}
+
+gen_shsl_c () {
+    echo "#define SHSL_IMPLEMENTATION"
+    gen_shsl_h
+    cat "${SHSL_ROOT}/shsl.c" | remove-local-includes
+}
+
+gen_shsl_h > "${SCRIPT_DIR}/shsl.h"
+gen_shsl_c > "${SCRIPT_DIR}/shsl.c"
