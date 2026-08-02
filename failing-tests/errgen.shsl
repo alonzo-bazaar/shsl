@@ -1,0 +1,31 @@
+#!../shsl
+;; -*- mode:clojure -*-
+;; vi: set ft=clojure:
+;; (exit 1)
+;(defmacro let* [& args] (cons 'let (vec->list args)))
+
+(defn split-on [s elt] 
+  (let [next-slice-from
+        (fn [i]
+          (let [next-slice-start (find-from s i != elt)
+                next-slice-end (and next-slice-start
+                                    (find-from s next-slice-start = elt))]
+            {:start next-slice-start
+             :end (or next-slice-end (len s))
+             }))]
+    t))
+
+(def split-on nil)
+(exit 1)
+
+;; (defn splat-on [s elt] 
+  ;; (let [next-slice-from
+        ;; (fn [i]
+          ;; (let [next-slice-start (find-from s i != elt)
+                ;; next-slice-end (and next-slice-start
+                                    ;; (find-from s next-slice-start = elt))]
+            ;; {:start next-slice-start
+             ;; :end (or next-slice-end (len s))
+             ;; }))]
+    ;; t))
+;; 

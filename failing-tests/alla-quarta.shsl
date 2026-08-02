@@ -1,0 +1,10 @@
+#!../shsl
+;; -*- mode:clojure -*-
+;; vi: set ft=clojure:
+
+(defn du-volte [a] (fn [b] (a (a b))))
+(defn quadrato [a] (* a a))
+
+;; (du-volte quadrato)
+;; (println ((du-volte quadrato) 10))
+(def alla-quarta (du-volte quadrato)) (println (alla-quarta 10))
