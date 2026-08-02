@@ -27,3 +27,13 @@ vgcore.*
 # additional shit that popped up while compiling and running with gcov
 *.gcno
 *.gcda
+
+# I stole and readapted lone's gdbinit
+# https://github.com/lone-lang/lone
+# and since lone is agplv3 licensed I don't know if I can have their gdbinit in here
+gdb_shsl_shit
+
+# directory of very wip things
+methlab
+methlab/*
+

@@ -301,7 +301,7 @@ size_t shsl_vec_length(shsl_ref vec_obj);
 shsl_ref shsl_vec_first(shsl_ref vec_obj);
 shsl_ref shsl_vec_last(shsl_ref vec_obj);
 shsl_ref shsl_vec_shallow_copy(shsl_ref vec_obj);
-shsl_ref shsl_vec_slice(shsl_ref vec_obj, size_t first, size_t last);
+shsl_ref shsl_vec_subvec(shsl_ref vec_obj, size_t first, size_t last);
 
 /// MAP MANIPULATIONS DECLARATIONS
 void shsl_map_expand(shsl_ref map_obj, size_t new_size);
@@ -917,17 +917,17 @@ char* shsl_append_chars_n(const char* s, size_t n, ...) {
 //// ----------------------------------------------------------------------------
 
 /// DATA TYPES DEFINITIONS
-    typedef struct shsl_ref {
-        shsl_obj* ptr;
-        bool is_weak;
-    } shsl_ref;
+typedef struct shsl_ref {
+    shsl_obj* ptr;
+    bool is_weak;
+} shsl_ref;
 
 typedef struct shsl_sym {
-    shsl_ref name; // must be string
+    const shsl_ref name; // must be string
 } shsl_sym ;
 typedef struct shsl_err {
-    shsl_ref data; // can be any
-    shsl_ref msg;  // must be string
+    const shsl_ref data; // can be any
+    const shsl_ref msg;  // must be string
 } shsl_err;
 typedef struct shsl_cons {
     shsl_ref car;
@@ -951,8 +951,8 @@ typedef struct shsl_map {
 typedef struct shsl_builtin_fn {
     // env must be cons list of frames (maps)
     // args must be a vector
-    shsl_ref env;
-    shsl_ref(*apply)(shsl_ref args, shsl_ref env);
+    const shsl_ref env;
+    shsl_ref(*const apply)(const shsl_ref args, const shsl_ref env);
 } shsl_builtin_fn;
 typedef struct shsl_lambda_list {
     shsl_ref all;        // the entire parameter vector
@@ -964,7 +964,7 @@ typedef struct shsl_lambda_list {
 typedef struct shsl_user_fn {
     // env must be cons list of maps
     // lambda_list be vector
-    shsl_ref env;
+    const shsl_ref env;
     shsl_lambda_list* lambda_list;
     shsl_expr** body;
     size_t body_length;
@@ -973,26 +973,26 @@ typedef struct shsl_user_fn {
 typedef struct shsl_obj {
     // header
     int ref_count;
-    SHSL_OBJ_TYPE type;
+    const SHSL_OBJ_TYPE type;
 
     // data
     union {
-	long i;
-	double r;
+	const long i;
+	const double r;
 	char* str;
 
-	shsl_sym sym;
+	const shsl_sym sym;
 	shsl_cons cons;
 
 	shsl_vec vec;
 	shsl_map map;
 
-	shsl_builtin_fn builtin_fn;
-	shsl_user_fn user_fn;
-	shsl_builtin_fn builtin_macro;
-	shsl_user_fn user_macro;
+	const shsl_builtin_fn builtin_fn;
+	const shsl_user_fn user_fn;
+	const shsl_builtin_fn builtin_macro;
+	const shsl_user_fn user_macro;
 
-	shsl_err err;
+	const shsl_err err;
     };
 } shsl_obj;	
 
@@ -1006,11 +1006,12 @@ shsl_ref shsl_ref_to_nil(void) {
 
 /// REFERENCE OPERATIONS DEFINITIONS
 #define return_mallocd_obj(...) do {                    \
+        shsl_obj obj = (shsl_obj){__VA_ARGS__};         \
         shsl_ref ref = (shsl_ref){                      \
             .ptr = (shsl_obj*)malloc(sizeof(shsl_obj)), \
             .is_weak = false,                           \
         };                                              \
-        *(ref.ptr) = (shsl_obj){__VA_ARGS__};           \
+        memcpy(ref.ptr, &obj, sizeof(shsl_obj));        \
         return ref;                                     \
     } while(0)
 
@@ -1025,6 +1026,9 @@ shsl_ref shsl_weak_ref_from_ptr(shsl_obj* ptr) {
         .ptr = ptr,
         .is_weak = true,
     };
+}
+shsl_ref shsl_ref_add_weak(shsl_ref ref) {
+    return ref;
 }
 shsl_ref shsl_ref_add(shsl_ref ref) {
     if(ref.is_weak) {
@@ -1398,6 +1402,7 @@ shsl_ref shsl_copy(shsl_ref ref) {
     assert(0 && "unreachable");
 }
 void shsl_free(shsl_ref ref) {
+    assert(ref.ptr && "object should not be a null pointer!");
 #ifdef SHSL_LOG_GC
     fprintf(stdout, "[SHSL GC] freeing object %p\n", (void*)(ref.ptr));
     shsl_fpr(ref, stdout);
@@ -1638,7 +1643,7 @@ shsl_ref shsl_vec_shallow_copy(shsl_ref orig) {
                        },
                       );
 }
-shsl_ref shsl_vec_slice(shsl_ref vec_obj, size_t first, size_t last) {
+shsl_ref shsl_vec_subvec(shsl_ref vec_obj, size_t first, size_t last) {
     assert(shsl_is_vec(vec_obj));
     if(first > last)
         return shsl_mkerr(vec_obj,
@@ -1925,6 +1930,7 @@ shsl_ref shsl_fn_env(shsl_ref ref) {
             assert(0 && "unreachable");
     }
 }
+/*
 void shsl_fn_env_mark_weak(shsl_ref ref) {
     assert(shsl_is_fn(ref));
     switch(ref.ptr->type) {
@@ -1944,6 +1950,7 @@ void shsl_fn_env_mark_weak(shsl_ref ref) {
             assert(0 && "unreachable");
     }
 }
+*/
 
 shsl_def_errtype_fn(int, int)
 shsl_def_errtype_fn(size_t, size_t)
@@ -3238,6 +3245,7 @@ shsl_ref shsl_macroexpand_1(shsl_ref form, shsl_ref env) {
 }
 
 void shsl_expr_free(shsl_expr* expr) {
+    assert(expr && "expr should not be a null pointer!");
     // recall
     // expressions don't own any shsl_obj they might contain
     // they only hold a reference to it
@@ -3567,11 +3575,11 @@ shsl_ref shsl_ll_env_mkframe(shsl_lambda_list* ll, shsl_ref vals) {
                  n_positional, shsl_vec_length(vals));
 
         // positional syms and positional vals
-        shsl_ref psyms = shsl_ref_add(shsl_vec_slice(syms, 0, n_positional));
-        shsl_ref pvals = shsl_ref_add(shsl_vec_slice(vals, 0, n_positional));
+        shsl_ref psyms = shsl_ref_add(shsl_vec_subvec(syms, 0, n_positional));
+        shsl_ref pvals = shsl_ref_add(shsl_vec_subvec(vals, 0, n_positional));
         // variadic sym and variadic vals (vector)
         shsl_ref vsym = ll->variadic;
-        shsl_ref vvals = shsl_vec_slice(vals, n_positional,
+        shsl_ref vvals = shsl_vec_subvec(vals, n_positional,
                                         n_positional + n_variadic);
 
         shsl_ref frame = shsl_env_mkframe(psyms, pvals);
@@ -3612,22 +3620,60 @@ bool shsl_env_has(shsl_ref env, shsl_ref key) {
     return kv != NULL;
 }
 
+shsl_ref shsl_fn_weak_cousin(shsl_obj* fn) {
+    switch(fn->type) {
+        case SHSL_BUILTIN_FN:
+            return shsl_mkbuiltin_fn
+                (shsl_weak_ref_from_ptr(fn->builtin_fn.env.ptr),
+                 fn->builtin_fn.apply);
+        case SHSL_BUILTIN_MACRO:
+            return shsl_mkbuiltin_macro
+                (shsl_weak_ref_from_ptr(fn->builtin_macro.env.ptr),
+                 fn->builtin_macro.apply);
+        case SHSL_USER_FN:
+            return shsl_mkuser_fn
+                (shsl_weak_ref_from_ptr(fn->user_fn.env.ptr),
+                 fn->user_fn.lambda_list,
+                 fn->user_fn.body,
+                 fn->user_fn.body_length);
+        case SHSL_USER_MACRO:
+            return shsl_mkuser_macro
+                (shsl_weak_ref_from_ptr(fn->user_macro.env.ptr),
+                 fn->user_macro.lambda_list,
+                 fn->user_macro.body,
+                 fn->user_macro.body_length);
+        default:
+            assert(0 && "fuck you");
+    }
+}
 shsl_ref shsl_env_set(shsl_ref env, shsl_ref key, shsl_ref new_val) {
     assert(shsl_is_sym(key));
     assert(shsl_is_cons(env));
     assert(shsl_is_map(shsl_car(env)));
+
+    // TODO:
+    // shitty incomplete cycle detection for avoiding circular references
+    // and only for function types, but it works for my usecase so...
+    // I shall stick with this for now I suppose
+    if(shsl_is_fn(new_val)) {
+        for(shsl_ref fn_env = shsl_fn_env(new_val);
+            shsl_is_cons(fn_env);
+            fn_env = shsl_cdr(fn_env)) {
+            if(fn_env.ptr == env.ptr && (!fn_env.is_weak)) {
+                shsl_ref_drop(fn_env);
+                shsl_ref newer_val = shsl_fn_weak_cousin(new_val.ptr);
+                free(new_val.ptr);
+                new_val.ptr = newer_val.ptr;
+                break;
+            }
+        }
+    }
 
     shsl_kv* kv = shsl_env_find_kv(env, key);
     if(!kv)
         shsl_map_set(shsl_car(env), key, new_val);
     else
         shsl_ref_set(&(kv->v), new_val);
-    // TODO:
-    // shitty incomplete cycle detection for avoiding circular references
-    if(shsl_is_fn(new_val)
-       && shsl_fn_env(new_val).ptr == env.ptr
-       && env.ptr->ref_count > 1)
-        shsl_fn_env_mark_weak(new_val);
 
     return new_val;
 }
@@ -3636,23 +3682,21 @@ shsl_ref shsl_env_def(shsl_ref env, shsl_ref key, shsl_ref new_val) {
     assert(shsl_is_cons(env));
     assert(shsl_is_map(shsl_car(env)));
 
-    shsl_map_set(shsl_car(env), key, new_val);
-
-    // mildly shitty circular reference detection, and only for function types
-    // it works for my use cases so... I shall stick with this for now I suppose
     if(shsl_is_fn(new_val)) {
-        bool risk_circular = false;
         for(shsl_ref fn_env = shsl_fn_env(new_val);
-            !shsl_is_nil(fn_env);
+            shsl_is_cons(fn_env);
             fn_env = shsl_cdr(fn_env)) {
-            if(fn_env.ptr == env.ptr) {
-                risk_circular = true;
+            if(fn_env.ptr == env.ptr && (!fn_env.is_weak)) {
+                shsl_ref_drop(fn_env);
+                shsl_ref newer_val = shsl_fn_weak_cousin(new_val.ptr);
+                free(new_val.ptr);
+                new_val.ptr = newer_val.ptr;
                 break;
             }
         }
-        if(risk_circular)
-            shsl_fn_env_mark_weak(new_val);
     }
+    shsl_map_set(shsl_car(env), key, new_val);
+
     return new_val;
 }
 
@@ -3665,7 +3709,7 @@ shsl_ref shsl_call_builtin_fn(shsl_ref fn, shsl_ref args) {
         ?fn.ptr->builtin_fn
         :fn.ptr->builtin_macro;
 
-    return inner_fn.apply (args, inner_fn.env);
+    return inner_fn.apply(args, inner_fn.env);
 }
 
 shsl_ref shsl_call_user_fn(shsl_ref fn, shsl_ref args) {
@@ -3714,6 +3758,8 @@ shsl_ref shsl_eval_sequence(shsl_expr** seq, size_t seq_length, shsl_ref env) {
     return res;
 }
 shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
+    assert(expr && "can't evaluate null pointer expression");
+    assert(env.ptr && "can't evaluate expression in null pointer environment");
     assert(shsl_is_nil(env)
            || (shsl_is_cons(env) && shsl_is_map(env.ptr->cons.car))
            && "if evaluation env is not null it must be a list of maps!");
@@ -4336,7 +4382,7 @@ shsl_defun(shsl_builtin_vecget, "vec-get", args, env, {
         shsl_ref ind = shsl_fn_arg(1);
         if((size_t)shsl_int(ind) >= shsl_vec_length(vec))
             return shsl_mkerr
-                (ind, "in funciton vecget: vector out of bounds read!");
+                (ind, "in funciton vec-get: vector out of bounds read!");
         return shsl_vec_get(vec, (size_t)shsl_int(ind));
     })
 shsl_defun(shsl_builtin_vecset, "vec-set!", args, env, {
@@ -4349,7 +4395,7 @@ shsl_defun(shsl_builtin_vecset, "vec-set!", args, env, {
         shsl_ref ind = shsl_fn_arg(1);
         if((size_t)shsl_int(ind) >= shsl_vec_length(vec))
             return shsl_mkerr
-                (ind, "in function vecset: vector out of bounds write!");
+                (ind, "in function vec-set: vector out of bounds write!");
 
         return vec;
     })
@@ -4382,7 +4428,7 @@ shsl_defun(shsl_builtin_veccat, "vec-cat", args, env, {
         }
         return res;
     })
-shsl_defun(shsl_builtin_vecslice, "vec-slice", args, env, {
+shsl_defun(shsl_builtin_subvec, "vec-sub", args, env, {
         (void)env;
         shsl_fn_assert_argslen(>= 2);
         shsl_fn_assert_argslen(<= 3);
@@ -4399,16 +4445,19 @@ shsl_defun(shsl_builtin_vecslice, "vec-slice", args, env, {
 
         if(start_s < 0)
             return shsl_mkerr
-                (shsl_fn_arg(1),
-                 "cannot slice into vector with negative start index");
+                (shsl_kwmap_fromelts(":vector", shsl_fn_arg(0),
+                                     ":start-index", shsl_fn_arg(1)),
+                 "cannot compute subvector vector with negative starting index");
         if(shsl_fn_argslen()==3 && end_s < 0)
             return shsl_mkerr
-                (shsl_fn_arg(2),
-                 "cannot slice into vector with negative end index!");
+                (shsl_kwmap_fromelts(":vector", shsl_fn_arg(0),
+                                     ":start-index", shsl_fn_arg(1),
+                                     ":end-index", shsl_fn_arg(2)),
+                 "cannot compute subvector vector with negative end index");
 
         size_t start = (size_t)start_s;
         size_t end = (size_t)end_s;
-        return shsl_vec_slice(v, start, end);
+        return shsl_vec_subvec(v, start, end);
     })
 
 /// BUILTIN MAP FUNCTIONS DEFINITIONS
@@ -4518,45 +4567,6 @@ shsl_defun(shsl_builtin_count, "count", args, env, {
                 return shsl_mkerr (col, "cannot get count of object");
         }
         return shsl_mkerr(shsl_ref_to_nil(), "unreachable");
-    })
-
-// could have been done in a more stdlib fashion
-// but I'll wait for multimethods for that
-shsl_defun(shsl_builtin_get, "get", args, env, {
-        (void)env;
-        shsl_fn_assert_argslen(>= 2);
-        shsl_fn_assert_argslen(<= 3);
-        shsl_fn_assert_argtype_either(0, SHSL_VEC, SHSL_MAP);
-
-        shsl_ref col = shsl_fn_arg(0);
-        shsl_ref ind = shsl_fn_arg(1);
-        shsl_ref def = shsl_vec_length(args)==3
-            ?shsl_vec_get(args, 2)
-            :shsl_ref_to_nil();
-        if(shsl_type(col) == SHSL_VEC) {
-            if(shsl_type(ind) != SHSL_INT)
-                return shsl_mkerr
-                    (ind, "cannot index into vector with non integer index!");
-            ssize_t is = shsl_int(ind);
-            if(is<0)
-                return shsl_mkerr
-                    (ind, "cannot index into vector with negative index!");
-            size_t i = (size_t)is;
-            if(i>=shsl_vec_length(col))
-                return shsl_mkerr
-                    (ind, "index out of bounds, tried accessing element at "
-                     "index %zu in an array of length %zu!",
-                     i, shsl_vec_length(col));
-            return shsl_vec_get(shsl_fn_arg(0), i);
-        }
-        if(shsl_type(col) == SHSL_MAP) {
-            ssize_t i = shsl_map_index(col, ind);
-            if(i<0)
-                return def;
-            return col.ptr->map.buf[i].v;
-        }
-        return shsl_mkerr
-            (shsl_ref_to_nil(), "this bit was supposed to be unreachable");
     })
 
 /// SHSL BUILTIN OTHER FUNCTIONS DEFINITIONS
@@ -4729,6 +4739,7 @@ shsl_ref shsl_env_mkempty(void) {
 // when initialized functions are often passed a ref to the environment they
 // were defined in, this can lead to circular refrences.
 // and we're using refcounting so that's a bit of a fucking problem
+/*
 void shsl_env_fix_circular_fn_refs(shsl_ref env) {
     shsl_ref top_frame = shsl_car(env);
     assert(shsl_type(top_frame) == SHSL_MAP);
@@ -4740,6 +4751,7 @@ void shsl_env_fix_circular_fn_refs(shsl_ref env) {
         }
     }
 }
+*/
 
 shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
     shsl_env_def(env, shsl_mksym("nil"), shsl_ref_to_nil());
@@ -4824,8 +4836,8 @@ shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
                  shsl_mkbuiltin_fn(env, shsl_builtin_vecpush));
     shsl_env_def(env, shsl_mksym("vec-cat"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_veccat));
-    shsl_env_def(env, shsl_mksym("vec-slice"),
-                 shsl_mkbuiltin_fn(env, shsl_builtin_vecslice));
+    shsl_env_def(env, shsl_mksym("vec-sub"),
+                 shsl_mkbuiltin_fn(env, shsl_builtin_subvec));
 
     // map operations
     shsl_env_def(env, shsl_mksym("map-get"),
@@ -4842,8 +4854,6 @@ shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
                  shsl_mkbuiltin_fn(env, shsl_builtin_strlen));
 
     // collection operations
-    shsl_env_def(env, shsl_mksym("get"),
-                 shsl_mkbuiltin_fn(env, shsl_builtin_get));
     shsl_env_def(env, shsl_mksym("count"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_count));
     shsl_env_def(env, shsl_mksym("contains?"),
@@ -4932,7 +4942,17 @@ shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
                   "(defn caar [l] (car (car l)))"
                   "(defn cadr [l] (car (cdr l)))"
                   "(defn cdar [l] (cdr (car l)))"
-                  "(defn cddr [l] (cdr (cdr l)))",
+                  "(defn cddr [l] (cdr (cdr l)))"
+
+                  "(defn caaar [l] (car (car (car l))))"
+                  "(defn caadr [l] (car (car (cdr l))))"
+                  "(defn cadar [l] (car (cdr (car l))))"
+                  "(defn caddr [l] (car (cdr (cdr l))))"
+
+                  "(defn cdaar [l] (cdr (car (car l))))"
+                  "(defn cdadr [l] (cdr (car (cdr l))))"
+                  "(defn cddar [l] (cdr (cdr (car l))))"
+                  "(defn cdddr [l] (cdr (cdr (cdr l))))",
                   env);
 
     shsl_eval_str(";; some small dumb utility things\n"
@@ -5014,10 +5034,12 @@ shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
                   "  (and-code (vec->list args)))",
                   env);
 
-    shsl_eval_str("(defn str-find [haystack needle]"
+    shsl_eval_str("(defn str-get [s i] (str-sub s i (+ i 1)))"
+
+                  "(defn str-find [haystack needle]"
                   "  (let [i 0"
                   "        l (str-len haystack)]"
-                  "    (while (and (!= i l) (!= (str-at haystack i) needle))"
+                  "    (while (and (!= i l) (!= (str-get haystack i) needle))"
                   "      (set i (+ i 1)))"
                   "    (if (!= i l) i nil)))"
                   

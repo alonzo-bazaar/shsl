@@ -5018,10 +5018,12 @@ shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
                   "  (and-code (vec->list args)))",
                   env);
 
-    shsl_eval_str("(defn str-find [haystack needle]"
+    shsl_eval_str("(defn str-get [s i] (str-sub s i (+ i 1)))"
+
+                  "(defn str-find [haystack needle]"
                   "  (let [i 0"
                   "        l (str-len haystack)]"
-                  "    (while (and (!= i l) (!= (str-at haystack i) needle))"
+                  "    (while (and (!= i l) (!= (str-get haystack i) needle))"
                   "      (set i (+ i 1)))"
                   "    (if (!= i l) i nil)))"
                   

@@ -1,0 +1,34 @@
+#!/usr/bin/env sh
+
+# for when I fucked something up in shsl and thus cannot run make.shsl to
+# recompile it 
+
+# I'm kinda tired or rewriting this same command all the time so just made a
+# script
+
+# far from the being the most advanced shit out there, it's really just here to
+# get me in a position where shsl can build itself again so I can continue
+# development as normal
+
+set -x
+case "$1" in
+    # this file is for when shit is severely fucked, which means... debugger time :D
+    # I'm using rr around gdb, and have a file with a bunch of gdb printing utils
+    "rc")
+        shift
+        rr record "$@"
+        ;;
+    "rp")
+        shift
+        rr replay --gdb-x=gdb_shsl_shit "$@" -- -q
+        ;;
+    'gcc')
+        gcc -Wall -Wextra -Wpedantic -Werror -Wno-parentheses -g3 -ggdb -o shsl shsl.c
+        ;;
+    'valgrind')
+        valgrind --tool=memcheck --leak-check=full -s ./shsl "$@"
+        ;;
+    *)
+        clang -Wall -Wextra -Wpedantic -Werror -g3 -ggdb -o shsl shsl.c
+        ;;
+esac
