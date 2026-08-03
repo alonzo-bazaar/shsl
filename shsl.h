@@ -1,4 +1,4 @@
-//// FILE HEADER
+/// FILE HEADER
 //// ----------------------------------------------------------------------------
 // SHSL: Single Header Scripting (Library|Language|Layer|Lisp)
 // embeddable interpreter for a small lisp language
@@ -1296,8 +1296,8 @@ shsl_ref shsl_mkmap(size_t initial_capacity) {
 shsl_ref shsl_mkbuiltin_fn(shsl_ref env,
                            shsl_ref(*apply)(shsl_ref args,
                                             shsl_ref env)) {
-    assert(shsl_is_nil(env)
-	   || (shsl_is_cons(env) && shsl_is_map(env.ptr->cons.car))
+    assert((shsl_is_nil(env)
+            || (shsl_is_cons(env) && shsl_is_map(env.ptr->cons.car)))
 	   && "if function env is not null it must be a list of maps!");
     return_mallocd_obj(.ref_count = 0,
 		       .type = SHSL_BUILTIN_FN,
@@ -1310,8 +1310,8 @@ shsl_ref shsl_mkbuiltin_fn(shsl_ref env,
 shsl_ref shsl_mkbuiltin_macro(shsl_ref env,
                               shsl_ref(*expand)(shsl_ref args,
                                                 shsl_ref env)) {
-    assert(shsl_is_nil(env)
-	   || (shsl_is_cons(env) && shsl_is_map(env.ptr->cons.car))
+    assert((shsl_is_nil(env)
+            || (shsl_is_cons(env) && shsl_is_map(env.ptr->cons.car)))
 	   && "if macro env is not null it must be a list of maps!");
 
     return_mallocd_obj(.ref_count = 0,
@@ -1324,8 +1324,8 @@ shsl_ref shsl_mkbuiltin_macro(shsl_ref env,
 }
 shsl_ref shsl_mkuser_fn(shsl_ref env, shsl_lambda_list* lambda_list,
                         struct shsl_expr** body, size_t body_length) {
-    assert(shsl_is_nil(env)
-	   || (shsl_is_cons(env) && shsl_is_map(env.ptr->cons.car))
+    assert((shsl_is_nil(env)
+            || (shsl_is_cons(env) && shsl_is_map(env.ptr->cons.car)))
 	   && "if function env is not null it must be a list of maps!");
     assert(body && "function body cannot be null pointer!");
 
@@ -1341,8 +1341,8 @@ shsl_ref shsl_mkuser_fn(shsl_ref env, shsl_lambda_list* lambda_list,
 }
 shsl_ref shsl_mkuser_macro(shsl_ref env, shsl_lambda_list* lambda_list,
                            struct shsl_expr** body, size_t body_length) {
-    assert(shsl_is_nil(env)
-	   || (shsl_is_cons(env) && shsl_is_map(env.ptr->cons.car))
+    assert((shsl_is_nil(env)
+            || (shsl_is_cons(env) && shsl_is_map(env.ptr->cons.car)))
 	   && "if function env is not null it must be a list of maps!");
     assert(body && "macro body cannot be null pointer!");
 
@@ -3751,8 +3751,8 @@ shsl_ref shsl_eval_sequence(shsl_expr** seq, size_t seq_length, shsl_ref env) {
 shsl_ref shsl_eval(shsl_expr* expr, shsl_ref env) {
     assert(expr && "can't evaluate null pointer expression");
     assert(env.ptr && "can't evaluate expression in null pointer environment");
-    assert(shsl_is_nil(env)
-           || (shsl_is_cons(env) && shsl_is_map(env.ptr->cons.car))
+    assert((shsl_is_nil(env)
+            || (shsl_is_cons(env) && shsl_is_map(env.ptr->cons.car)))
            && "if evaluation env is not null it must be a list of maps!");
 
     switch(expr->type) {
@@ -4355,6 +4355,19 @@ shsl_defun(shsl_builtin_substr, "str-sub", args, env, {
         return shsl_mkstr_nocopy(res_buf);
     })
 
+shsl_defun(shsl_builtin_strcat, "str-cat", args, env, {
+        (void)env;
+        shsl_vec_foreach(i, arg, args)
+            shsl_fn_assert_argtype(i, SHSL_STR);
+
+        shsl_string_builder sb = {0};
+        shsl_vec_foreach(i, arg, args)
+            shsl_sb_push_nullt_str(&sb, arg.ptr->str);
+
+        shsl_sb_push(&sb, '\0');
+        return shsl_mkstr_nocopy(shsl_sb_get(&sb)); 
+    })
+
 shsl_defun(shsl_builtin_strlen, "str-len", args, env, {
         (void)env;
         shsl_fn_assert_argslen(== 1);
@@ -4393,10 +4406,10 @@ shsl_defun(shsl_builtin_vecset, "vec-set!", args, env, {
 shsl_defun(shsl_builtin_vecpush, "vec-push!", args, env, {
         (void)env;
         shsl_fn_assert_argslen(== 2);
-        shsl_fn_assert_argtype(1, SHSL_VEC);
+        shsl_fn_assert_argtype(0, SHSL_VEC);
 
-        shsl_ref vec = shsl_fn_arg(1);
-        shsl_vec_push(vec, shsl_fn_arg(0));
+        shsl_ref vec = shsl_fn_arg(0);
+        shsl_vec_push(vec, shsl_fn_arg(1));
         return vec;
     })
 shsl_defun(shsl_builtin_veclen, "vec-len", args, env, {
@@ -4412,11 +4425,10 @@ shsl_defun(shsl_builtin_veccat, "vec-cat", args, env, {
             shsl_fn_assert_argtype(i, SHSL_VEC);
 
         shsl_ref res = shsl_mkvec(0);
-        shsl_vec_foreach(i, arg, args) {
-            shsl_vec_foreach(j, elt, arg) {
+        shsl_vec_foreach(i, arg, args)
+            shsl_vec_foreach(j, elt, arg)
                 shsl_vec_push(res, elt);
-            }
-        }
+
         return res;
     })
 shsl_defun(shsl_builtin_subvec, "vec-sub", args, env, {
@@ -4841,6 +4853,8 @@ shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
                  shsl_mkbuiltin_fn(env, shsl_builtin_str));
     shsl_env_def(env, shsl_mksym("str-sub"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_substr));
+    shsl_env_def(env, shsl_mksym("str-cat"),
+                 shsl_mkbuiltin_fn(env, shsl_builtin_strcat));
     shsl_env_def(env, shsl_mksym("str-len"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_strlen));
 

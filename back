@@ -23,7 +23,7 @@ case "$1" in
         rr replay --gdb-x=gdb_shsl_shit "$@" -- -q
         ;;
     'gcc')
-        gcc -Wall -Wextra -Wpedantic -Werror -Wno-parentheses -g3 -ggdb -o shsl shsl.c
+        gcc -Wall -Wextra -Wpedantic -Werror -g3 -ggdb -o shsl shsl.c
         ;;
     'valgrind')
         valgrind --tool=memcheck --leak-check=full -s ./shsl "$@"

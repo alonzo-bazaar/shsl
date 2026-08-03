@@ -36,7 +36,7 @@
 
 (def common-cflags
   (let [warnings
-        ["-Wall" "-Wextra" "-Wpedantic" "-Wswitch" "-Wno-parentheses" "-Werror"]
+        ["-Wall" "-Wextra" "-Wpedantic" "-Wswitch" "-Werror"]
         debug-flags
         (vec-cat ["-O0" "-g3" "-ggdb"]
                  (if (and (= cc "gcc") (arg? "--coverage"))
@@ -103,7 +103,8 @@
                ["gcov" "shsl.c"]))
 
 (defn main []
-  (cond ((arg? "--compile-only")
+  (cond 
+        ((arg? "--compile-only")
          (compile-exe))
 
         ((arg? "--valgrind-only")
@@ -119,12 +120,16 @@
         ;;  (compile-exe)
         ;;  (run-gcov-tests))
 
-        (t
+        ((arg? "--full")
          (compile-exe)
          (run-self-tests)
          (run-shell-tests)
          (compile-library-tests)
-         (run-library-tests))))
+         (run-library-tests))
+
+        (t
+         (compile-exe))
+        ))
 
 (main)
 
