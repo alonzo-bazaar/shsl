@@ -2372,12 +2372,12 @@ parser_pair parse_until(const char* str,
 // when deleting an expression, delete its subexpressions as well
 typedef struct shsl_vec_expr {
     shsl_expr** elts;
-    size_t size;
+    const size_t size;
 } shsl_vec_expr;
 typedef struct shsl_map_expr {
     shsl_expr** keys;
     shsl_expr** vals;
-    size_t size;
+    const size_t size;
 } shsl_map_expr;
 typedef struct shsl_if_expr {
     shsl_expr* condition;
@@ -2386,80 +2386,80 @@ typedef struct shsl_if_expr {
 } shsl_if_expr;
 typedef struct shsl_do_expr {
     shsl_expr** body;
-    size_t body_length;
+    const size_t body_length;
 } shsl_do_expr;
 typedef struct shsl_do_poking_expr {
     shsl_expr** body;
-    size_t body_length;
+    const size_t body_length;
 } shsl_do_poking_expr;
 typedef struct shsl_let_expr {
-    shsl_ref keys;
+    const shsl_ref keys;
     shsl_expr** vals;
-    size_t binds_length;
+    const size_t binds_length;
     shsl_expr** body;
-    size_t body_length;
+    const size_t body_length;
 } shsl_let_expr;
 typedef struct shsl_while_expr {
     shsl_expr* condition;
     shsl_expr** body;
-    size_t body_length;
+    const size_t body_length;
 } shsl_while_expr;
 typedef struct shsl_def_expr {
-    shsl_ref name;           // must be symbol
+    const shsl_ref name;      // must be symbol
     shsl_expr* value;
 } shsl_def_expr;
 typedef struct shsl_set_expr {
-    shsl_ref name;           // must be symbol
+    const shsl_ref name;      // must be symbol
     shsl_expr* value;
 } shsl_set_expr;
 typedef struct shsl_fn_expr {
     shsl_lambda_list* lambda_list;
     shsl_expr** body;
-    size_t body_length;
+    const size_t body_length;
 } shsl_fn_expr;
 typedef struct shsl_macro_expr {
     shsl_lambda_list* lambda_list;
     shsl_expr** body;
-    size_t body_length;
+    const size_t body_length;
 } shsl_macro_expr;
 typedef struct shsl_funcall_expr {
     shsl_expr* fn_expr;
     shsl_expr** args;
-    size_t args_length;
+    const size_t args_length;
 } shsl_funcall_expr;
 
 typedef struct shsl_expr {
-    SHSL_EXPR_TYPE type;
-    union {
-        shsl_ref literal;
-        shsl_ref lookup_symbol; // must be symbol
+    const SHSL_EXPR_TYPE type;
+    const union {
+        const shsl_ref literal;
+        const shsl_ref lookup_symbol; // must be symbol
 
-        shsl_vec_expr vec_expr;
-        shsl_map_expr map_expr;
+        const shsl_vec_expr vec_expr;
+        const shsl_map_expr map_expr;
 
-        shsl_if_expr if_expr;
-        shsl_do_expr do_expr;
-        shsl_do_poking_expr do_poking_expr;
-        shsl_let_expr let_expr;
-        shsl_while_expr while_expr;
+        const shsl_if_expr if_expr;
+        const shsl_do_expr do_expr;
+        const shsl_do_poking_expr do_poking_expr;
+        const shsl_let_expr let_expr;
+        const shsl_while_expr while_expr;
 
-        shsl_def_expr def_expr;
-        shsl_set_expr set_expr;
+        const shsl_def_expr def_expr;
+        const shsl_set_expr set_expr;
 
-        shsl_fn_expr fn_expr;
-        shsl_macro_expr macro_expr;
+        const shsl_fn_expr fn_expr;
+        const shsl_macro_expr macro_expr;
 
-        shsl_funcall_expr funcall_expr;
+        const shsl_funcall_expr funcall_expr;
     };
 } shsl_expr;
 
 /// EXPRESSION FUNCTIONS DEFINITIONS
 // https://stackoverflow.com/questions/6750512/gcc-warning-iso-c-does-not-permit-named-variadic-macros
-#define return_mallocd_expr(...) do {                   \
-        shsl_expr* expr =                               \
-            (shsl_expr*)malloc(sizeof(shsl_expr));      \
-        *expr = (shsl_expr){__VA_ARGS__};               \
-        return expr;                                    \
+#define return_mallocd_expr(...) do {                                   \
+        shsl_expr* expr = (shsl_expr*)malloc(sizeof(shsl_expr));        \
+        shsl_expr tmp = (shsl_expr){__VA_ARGS__};                       \
+        memcpy(expr, &tmp, sizeof(shsl_expr));                          \
+        return expr;                                                    \
     } while(0)
 // this is how we represent parsing errors
 bool shsl_expr_is_error(shsl_expr* expr) {
@@ -2531,6 +2531,11 @@ void shsl_free_expr_arr(shsl_expr** arr, size_t len) {
     free(arr);
 }
 
+shsl_expr* shsl_malloc_nil_literal(void) {
+    return_mallocd_expr(.type = SHSL_EXPR_LITERAL,
+                        .literal = shsl_ref_to_nil());
+}
+
 /// FORM TRANSLATION FUNCTIONS DEFINITIONS
 // (we pass an env to this because shsl_form_to_expr is also responsible for
 //  macro expansion (it was easier to put it here than to make a separate
@@ -2557,8 +2562,8 @@ shsl_expr* shsl_form_to_expr(shsl_ref form, shsl_ref env) {
                                     .lookup_symbol = shsl_ref_add(form));
 
         case SHSL_VEC: {
-            shsl_expr** elt_exprs = SHSL_ARR_ALLOC(shsl_expr*,
-                                                   shsl_vec_length(form));
+            shsl_expr** elt_exprs = SHSL_ARR_ALLOC
+                (shsl_expr*, shsl_vec_length(form));
 
             // can't use shsl_form_list_to_expr_arr as vector forms aren't lists
             shsl_vec_foreach(i, form_elt, form) {
@@ -2705,16 +2710,9 @@ shsl_expr* shsl_form_to_expr(shsl_ref form, shsl_ref env) {
                     shsl_expr* t = body[1];
                     // (if <condition> <then>) should implicitly get turned into
                     // (if <condition> <then> nil)
-                    shsl_expr* e;
-                    if(form_length == 4)
-                        e = body[2];
-                    else {
-                        e = (shsl_expr*)malloc(sizeof(shsl_expr));
-                        *e = (shsl_expr) {
-                            .type = SHSL_EXPR_LITERAL,
-                            .literal = shsl_ref_to_nil(),
-                        };
-                    }
+                    shsl_expr* e = (form_length)==4
+                        ?body[2]
+                        :shsl_malloc_nil_literal();
                     free(body);
 
                     return_mallocd_expr(.type = SHSL_EXPR_IF,
@@ -2757,7 +2755,7 @@ shsl_expr* shsl_form_to_expr(shsl_ref form, shsl_ref env) {
 
                     shsl_ref keys = shsl_mkvec(binds_length/2);
                     for(size_t i = 0; i<shsl_vec_length(binds_vec); i+=2)
-                        shsl_vec_push(keys,shsl_vec_get(binds_vec, i));
+                        shsl_vec_push(keys, shsl_vec_get(binds_vec, i));
 
                     shsl_expr** vals = SHSL_ARR_ALLOC(shsl_expr*,
                                                       binds_length/2); 
@@ -3262,15 +3260,12 @@ void shsl_expr_free(shsl_expr* expr) {
             free(expr);
             break;
         case SHSL_EXPR_VEC:
-            shsl_free_expr_arr(expr->vec_expr.elts,
-                               expr->vec_expr.size);
+            shsl_free_expr_arr(expr->vec_expr.elts, expr->vec_expr.size);
             free(expr);
             break;
         case SHSL_EXPR_MAP:
-            shsl_free_expr_arr(expr->map_expr.keys,
-                               expr->map_expr.size);
-            shsl_free_expr_arr(expr->map_expr.vals,
-                               expr->map_expr.size);
+            shsl_free_expr_arr(expr->map_expr.keys, expr->map_expr.size);
+            shsl_free_expr_arr(expr->map_expr.vals, expr->map_expr.size);
             free(expr);
             break;
         case SHSL_EXPR_IF:
@@ -3281,10 +3276,8 @@ void shsl_expr_free(shsl_expr* expr) {
             break;
         case SHSL_EXPR_LET:
             shsl_ref_drop(expr->let_expr.keys);
-            shsl_free_expr_arr(expr->let_expr.vals,
-                               expr->let_expr.binds_length);
-            shsl_free_expr_arr(expr->let_expr.body,
-                               expr->let_expr.body_length);
+            shsl_free_expr_arr(expr->let_expr.vals, expr->let_expr.binds_length);
+            shsl_free_expr_arr(expr->let_expr.body, expr->let_expr.body_length);
             free(expr);
             break;
         case SHSL_EXPR_WHILE:
@@ -3308,8 +3301,7 @@ void shsl_expr_free(shsl_expr* expr) {
             shsl_ref_drop(expr->fn_expr.lambda_list->variadic);
             shsl_ref_drop(expr->fn_expr.lambda_list->keyword);
             free(expr->fn_expr.lambda_list);
-            shsl_free_expr_arr(expr->fn_expr.body,
-                               expr->fn_expr.body_length);
+            shsl_free_expr_arr(expr->fn_expr.body, expr->fn_expr.body_length);
             free(expr);
             break;
         case SHSL_EXPR_MACRO:
@@ -3323,8 +3315,7 @@ void shsl_expr_free(shsl_expr* expr) {
             break;
 
         case SHSL_EXPR_DO:
-            shsl_free_expr_arr(expr->do_expr.body,
-                               expr->do_expr.body_length);
+            shsl_free_expr_arr(expr->do_expr.body, expr->do_expr.body_length);
             free(expr);
             break;
         case SHSL_EXPR_DO_POKING:
@@ -3374,7 +3365,7 @@ shsl_expr* shsl_expr_copy(shsl_expr* orig) {
                 keys[i] = shsl_expr_copy(orig->map_expr.keys[i]);
                 vals[i] = shsl_expr_copy(orig->map_expr.vals[i]);
             }
-            return_mallocd_expr(.type = SHSL_EXPR_VEC,
+            return_mallocd_expr(.type = SHSL_EXPR_MAP,
                                 .map_expr = (shsl_map_expr) {
                                     .keys = keys,
                                     .vals = vals,
