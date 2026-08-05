@@ -131,6 +131,21 @@ bool shsl_string_ends_with(const char* str, const char* suf);
 #define SHSL_CALLOC(size, type) (type*)calloc(size, sizeof(type))
 #define SHSL_ARR_ALLOC(type, ...) (type*)calloc((__VA_ARGS__), sizeof(type))
 
+// feature macro taken from man getline, and reversed 
+#if _POSIX_C_SOURCE < 200809L
+#define SHSL_USE_OWN_GETLINE
+#endif
+
+#if defined(SHSL_USE_OWN_GETLINE)
+// sometimes getline is not present, but we use getline for the repl!
+// so we gotta redefine it...
+// and by redefine it, I mean steal it from stackoverflow
+// (the implementation here stolen is public domain, so we can)
+// Source - https://stackoverflow.com/a/735472
+// Posted by Will Hartung
+ssize_t getline(char **lineptr, size_t *n, FILE *stream);
+#endif
+
 //// SHSL DATA DECLARATIONS
 //// ----------------------------------------------------------------------------
 /// DATA TYPES DECLARATIONS
@@ -913,6 +928,55 @@ char* shsl_append_chars_n(const char* s, size_t n, ...) {
     return shsl_sb_get(&sb);
 }
 
+#if defined(SHSL_USE_OWN_GETLINE)
+// Source - https://stackoverflow.com/a/735472
+// Posted by Will Hartung
+
+// the code has been modified sligthtly from the original
+// for stylistic reasons, and to fix a couple mistakes/warnings
+ssize_t getline(char **lineptr, size_t *n, FILE *stream) {
+    if (lineptr == NULL || stream == NULL || n == NULL)
+        return -1;
+
+    int c = fgetc(stream);
+    if (c == EOF)
+        return -1;
+
+    char* bufptr = *lineptr;
+    size_t size = *n;
+    if (bufptr == NULL) {
+        bufptr = malloc(128);
+        if (bufptr == NULL)
+            return -1;
+        size = 128;
+    }
+
+    char *p = bufptr;
+    while(c != EOF) {
+        // size_t cast assumes p always >= bufptr
+        // (we control p so we can make/enforce this assumption)
+        if ((size_t)(p - bufptr + 1) > size) {
+            size = size + 128;
+            bufptr = realloc(bufptr, size);
+            if (bufptr == NULL) {
+                return -1;
+            }
+        }
+        *p++ = c;
+        if (c == '\n')
+            break;
+
+        c = fgetc(stream);
+    }
+
+    *p++ = '\0';
+    *lineptr = bufptr;
+    *n = size;
+
+    return p - bufptr - 1;
+}
+#endif
+
 //// SHSL DATA DEFINITIONS
 //// ----------------------------------------------------------------------------
 
@@ -1582,8 +1646,8 @@ void shsl_vec_expand(shsl_ref vec_ref, size_t new_size) {
     assert(shsl_is_vec(vec_ref));
 
     if(vec_ref.ptr->vec.capacity >= new_size) return;
-    vec_ref.ptr->vec.buf = (shsl_ref*)reallocarray
-        (vec_ref.ptr->vec.buf, new_size, sizeof(shsl_ref));
+    vec_ref.ptr->vec.buf = (shsl_ref*)realloc
+        (vec_ref.ptr->vec.buf, new_size * sizeof(shsl_ref));
     vec_ref.ptr->vec.capacity = new_size;
 }
 void shsl_vec_push(shsl_ref vec_ref, shsl_ref obj) {
@@ -1664,8 +1728,8 @@ void shsl_map_expand(shsl_ref map_ref, size_t new_size) {
     assert(shsl_is_map(map_ref));
 
     if (map_ref.ptr->map.capacity >= new_size) return;
-    map_ref.ptr->map.buf = (shsl_kv*)reallocarray
-        (map_ref.ptr->map.buf, new_size, sizeof(shsl_kv));
+    map_ref.ptr->map.buf = (shsl_kv*)realloc
+        (map_ref.ptr->map.buf, new_size * sizeof(shsl_kv));
     map_ref.ptr->map.capacity = new_size;
 }
 ssize_t shsl_map_index(shsl_ref map_ref, shsl_ref key) {
@@ -2509,7 +2573,10 @@ shsl_expr** shsl_form_list_to_expr_arr(shsl_ref form, shsl_ref env) {
     // (map 'vector #'form-to-expr form)
     assert(shsl_is_list(form));
     size_t len = shsl_list_length(form);
-    shsl_expr** res = SHSL_ARR_ALLOC(shsl_expr*, len);
+    // for some reason gcc with -O2 -g shits itself if I try allocating
+    // a size_t * (some data type with size 4) so... I'm casting it to
+    // unsigned int to avoid gcc erroring out on this line :|
+    shsl_expr** res = SHSL_ARR_ALLOC(shsl_expr*, (unsigned int)len);
     for(size_t i = 0; i<len; ++i) {
         res[i] = shsl_form_to_expr(shsl_nth(form, i), env);
     }
@@ -4368,6 +4435,13 @@ shsl_defun(shsl_builtin_strcat, "str-cat", args, env, {
         return shsl_mkstr_nocopy(shsl_sb_get(&sb)); 
     })
 
+shsl_defun(shsl_builtin_strcat_vec, "str-cat-vec", args, env, {
+        shsl_fn_assert_argslen(==1);
+        shsl_fn_assert_argtype(0, SHSL_VEC);
+
+        return shsl_builtin_strcat(shsl_fn_arg(0), env);
+    })
+
 shsl_defun(shsl_builtin_strlen, "str-len", args, env, {
         (void)env;
         shsl_fn_assert_argslen(== 1);
@@ -4391,7 +4465,7 @@ shsl_defun(shsl_builtin_vecget, "vec-get", args, env, {
     })
 shsl_defun(shsl_builtin_vecset, "vec-set!", args, env, {
         (void)env;
-        shsl_fn_assert_argslen(== 2);
+        shsl_fn_assert_argslen(== 3);
         shsl_fn_assert_argtype(0, SHSL_VEC);
         shsl_fn_assert_argtype(1, SHSL_INT);
 
@@ -4400,6 +4474,8 @@ shsl_defun(shsl_builtin_vecset, "vec-set!", args, env, {
         if((size_t)shsl_int(ind) >= shsl_vec_length(vec))
             return shsl_mkerr
                 (ind, "in function vec-set: vector out of bounds write!");
+
+        shsl_vec_set(vec, shsl_int(ind), shsl_fn_arg(2));
 
         return vec;
     })
@@ -4431,6 +4507,13 @@ shsl_defun(shsl_builtin_veccat, "vec-cat", args, env, {
 
         return res;
     })
+shsl_defun(shsl_builtin_veccat_vec, "vec-cat-vec", args, env, {
+        shsl_fn_assert_argslen(==1);
+        shsl_fn_assert_argtype(0, SHSL_VEC);
+
+        return shsl_builtin_veccat(shsl_fn_arg(0), env);
+    })
+
 shsl_defun(shsl_builtin_subvec, "vec-sub", args, env, {
         (void)env;
         shsl_fn_assert_argslen(>= 2);
@@ -4839,6 +4922,8 @@ shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
                  shsl_mkbuiltin_fn(env, shsl_builtin_vecpush));
     shsl_env_def(env, shsl_mksym("vec-cat"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_veccat));
+    shsl_env_def(env, shsl_mksym("vec-cat-vec"),
+                 shsl_mkbuiltin_fn(env, shsl_builtin_veccat_vec));
     shsl_env_def(env, shsl_mksym("vec-sub"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_subvec));
 
@@ -4855,6 +4940,8 @@ shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
                  shsl_mkbuiltin_fn(env, shsl_builtin_substr));
     shsl_env_def(env, shsl_mksym("str-cat"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_strcat));
+    shsl_env_def(env, shsl_mksym("str-cat-vec"),
+                 shsl_mkbuiltin_fn(env, shsl_builtin_strcat_vec));
     shsl_env_def(env, shsl_mksym("str-len"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_strlen));
 
@@ -4924,156 +5011,309 @@ shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
 
 
 shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
-    shsl_eval_str(";; some basics we're just gonna need\n"
-                  "(def defmacro"
-                  "  (macro [name args & body]"
-                  "         (cons 'def"
-                  "               (cons name"
-                  "                     (list"
-                  "                      (cons 'macro"
-                  "                            (cons args"
-                  "                                  (vec->list body))))))))"
+    shsl_eval_str
+        (";; some basics we're just gonna need\n"
+         "(def defmacro"
+         "  (macro [name args & body]"
+         "         (cons 'def"
+         "               (cons name"
+         "                     (list"
+         "                      (cons 'macro"
+         "                            (cons args"
+         "                                  (vec->list body))))))))"
 
-                  "(defmacro defn [name args & body]"
-                  "  (cons 'def"
-                  "        (cons name"
-                  "              (list"
-                  "               (cons 'fn"
-                  "                     (cons args"
-                  "                           (vec->list body)))))))",
-                  env);
+         "(defmacro defn [name args & body]"
+         "  (cons 'def"
+         "        (cons name"
+         "              (list"
+         "               (cons 'fn"
+         "                     (cons args"
+         "                           (vec->list body)))))))",
+         env);
 
-    shsl_eval_str(";; with due apologies to rich hickey\n"
-                  "(defn caar [l] (car (car l)))"
-                  "(defn cadr [l] (car (cdr l)))"
-                  "(defn cdar [l] (cdr (car l)))"
-                  "(defn cddr [l] (cdr (cdr l)))"
+    shsl_eval_str
+        (";; with due apologies to rich hickey\n"
+         "(defn caar [l] (car (car l)))"
+         "(defn cadr [l] (car (cdr l)))"
+         "(defn cdar [l] (cdr (car l)))"
+         "(defn cddr [l] (cdr (cdr l)))"
 
-                  "(defn caaar [l] (car (car (car l))))"
-                  "(defn caadr [l] (car (car (cdr l))))"
-                  "(defn cadar [l] (car (cdr (car l))))"
-                  "(defn caddr [l] (car (cdr (cdr l))))"
+         "(defn caaar [l] (car (car (car l))))"
+         "(defn caadr [l] (car (car (cdr l))))"
+         "(defn cadar [l] (car (cdr (car l))))"
+         "(defn caddr [l] (car (cdr (cdr l))))"
 
-                  "(defn cdaar [l] (cdr (car (car l))))"
-                  "(defn cdadr [l] (cdr (car (cdr l))))"
-                  "(defn cddar [l] (cdr (cdr (car l))))"
-                  "(defn cdddr [l] (cdr (cdr (cdr l))))",
-                  env);
+         "(defn cdaar [l] (cdr (car (car l))))"
+         "(defn cdadr [l] (cdr (car (cdr l))))"
+         "(defn cddar [l] (cdr (cdr (car l))))"
+         "(defn cdddr [l] (cdr (cdr (cdr l))))",
+         env);
 
-    shsl_eval_str(";; some small dumb utility things\n"
-                  "(defn != [a b] (not (= a b)))",
-                  env);
+    shsl_eval_str
+        (";; some small dumb utility things\n"
+         "(defn != [a b] (not (= a b)))",
+         env);
 
-    shsl_eval_str(";; poor man's quasiquoting\n"
-                  "(defn if-code [check then else]"
-                  "  (list 'if check then else))"
+    shsl_eval_str
+        (";; poor man's quasiquoting\n"
+         "(defn if-code [check then else]"
+         "  (list 'if check then else))"
 
-                  "(defn do-code [exprs-lst]"
-                  "  (cons 'do exprs-lst))"
+         "(defn do-code [exprs-lst]"
+         "  (cons 'do exprs-lst))"
 
-                  "(defn not-code [expr]"
-                  "  (list 'not expr))"
+         "(defn do-poking-code [exprs-lst]"
+         "  (cons 'do-poking exprs-lst))"
 
-                  "(defn let-code [binds body]"
-                  "  (list 'let binds body))"
+         "(defn while-code [condition exprs-lst]"
+         "  (cons 'while (cons condition exprs-lst)))"
 
-                  "(defn do-code [exprs-lst]"
-                  "  (cons 'do exprs-lst))"
+         "(defn not-code [expr]"
+         "  (list 'not expr))"
 
-                  "(defn not-code [expr]"
-                  "  (list 'not expr))"
+         "(defn let-code [binds body]"
+         "  (list 'let binds body))"
 
-                  "(defn set-code [a b]"
-                  "  (list 'set a b))"
+         "(defn do-code [exprs-lst]"
+         "  (cons 'do exprs-lst))"
 
-                  "(defn def-code [a b]"
-                  "  (list 'def a b))"
+         "(defn not-code [expr]"
+         "  (list 'not expr))"
 
-                  "(defn let-code [binds & body]"
-                  "  (cons 'let (cons binds (vec->list body))))",
-                  env);
+         "(defn set-code [a b]"
+         "  (list 'set a b))"
 
-    shsl_eval_str(";; and now, time for hella macros\n"
-                  "(defmacro when [check & then]"
-                  "  (if-code check (do-code (vec->list then)) nil))"
+         "(defn def-code [a b]"
+         "  (list 'def a b))"
 
-                  "(defmacro unless [check & else]"
-                  "  (if-code (not-code check) (do-code (vec->list else)) nil))"
+         "(defn let-code [binds & body]"
+         "  (cons 'let (cons binds (vec->list body))))",
+         env);
 
-                  "(defn cond-code [conds]"
-                  "  (if conds"
-                  "    (let [fs (car conds)]"
-                  "      (if-code (car fs)"
-                  "        (do-code (cdr fs))"
-                  "        (cond-code (cdr conds))))))"
+    shsl_eval_str
+        (";; and now, time for hella macros\n"
+         "(defmacro when [check & then]"
+         "  (if-code check (do-code (vec->list then)) nil))"
 
-                  "(defmacro cond [& conds]"
-                  "  (cond-code (vec->list conds)))",
-                  env);
+         "(defmacro unless [check & else]"
+         "  (if-code (not-code check) (do-code (vec->list else)) nil))"
 
-    shsl_eval_str("(defn or-code [args]"
-                  "  (cond ((nil? args) nil)"
-                  "        ((nil? (cdr args)) (car args))"
-                  "        (t (let [fir (car args)"
-                  "                 firsym (gensym \"check\")"
-                  "                 res (cdr args)]"
-                  "             (let-code [firsym fir]"
-                  "               (if-code firsym firsym (or-code res)))))))"
+         "(defn cond-code [conds]"
+         "  (if conds"
+         "    (let [fs (car conds)]"
+         "      (if-code (car fs)"
+         "        (do-code (cdr fs))"
+         "        (cond-code (cdr conds))))))"
 
-                  "(defmacro or [& args]"
-                  "  (or-code (vec->list args)))",
-                  env);
+         "(defmacro cond [& conds]"
+         "  (cond-code (vec->list conds)))"
 
-    shsl_eval_str("(defn and-code [args]"
-                  "  (cond ((nil? args) nil)"
-                  "        ((nil? (cdr args)) (car args))"
-                  "        (t (let [fir (car args)"
-                  "                 firsym (gensym \"check\")"
-                  "                 res (cdr args)]"
-                  "             (let-code [firsym fir]"
-                  "               (if-code (not-code firsym)"
-                  "                 firsym"
-                  "                 (and-code res)))))))"
+         "(defn let*-code [binds body]"
+         " (cond"
+         "  ;; (> 2 (len binds))\n"
+         "  ((cddr binds)"
+         "   (let-code [(car binds) (cadr binds)]"
+         "    (let*-code (cddr binds) body)))"
+         "  ;; (> 1 (len binds)) (= 2)\n"
+         "  ((cdr binds)"
+         "   (cons 'let (cons [(car binds) (cadr binds)] body)))"
+         "  ;; (> 0 (len binds)) (= 1)\n"
+         "  ((car binds)"
+         "   (err"
+         "    (str \"malformed let* bind, \""
+         "         \"odd number of elements in bindings vector!\")))"
+         "  ;; (= 0 (len binds))\n"
+         "  (t body)))"
+
+         "(defmacro let* [binds & body]"
+         "  (let*-code (vec->list binds) (vec->list body)))",
+         env);
+
+    shsl_eval_str
+        ("(defn or-code [args]"
+         "  (cond ((nil? args) nil)"
+         "        ((nil? (cdr args)) (car args))"
+         "        (t (let [fir (car args)"
+         "                 firsym (gensym \"check\")"
+         "                 res (cdr args)]"
+         "             (let-code [firsym fir]"
+         "               (if-code firsym firsym (or-code res)))))))"
+
+         "(defmacro or [& args]"
+         "  (or-code (vec->list args)))",
+         env);
+
+    shsl_eval_str
+        ("(defn and-code [args]"
+         "  (cond ((nil? args) nil)"
+         "        ((nil? (cdr args)) (car args))"
+         "        (t (let [fir (car args)"
+         "                 firsym (gensym \"check\")"
+         "                 res (cdr args)]"
+         "             (let-code [firsym fir]"
+         "               (if-code (not-code firsym)"
+         "                 firsym"
+         "                 (and-code res)))))))"
                   
-                  "(defmacro and [& args]"
-                  "  (and-code (vec->list args)))",
-                  env);
+         "(defmacro and [& args]"
+         "  (and-code (vec->list args)))",
+         env);
 
-    shsl_eval_str("(defn str-get [s i] (str-sub s i (+ i 1)))"
+    // here we define a bunch of lil useful functions
+    // indexing into from collections
+    shsl_eval_str
+        ("(defn str-get [s i] (str-sub s i (+ i 1)))"
 
-                  "(defn str-find [haystack needle]"
-                  "  (let [i 0"
-                  "        l (str-len haystack)]"
-                  "    (while (and (!= i l) (!= (str-get haystack i) needle))"
-                  "      (set i (+ i 1)))"
-                  "    (if (!= i l) i nil)))"
+         "(defn get [a b]"
+         "  (cond ((str?  a) (str-get a b))"
+         "        ((vec?  a) (vec-get a b))"
+         "        ((map?  a) (map-get a b))"
+         "        ((cons? a) (nth a b))"
+         "        ((nil?  a) nil)"
+         "        (t (err \"can't index into datum not well defined\""
+         "                {:datum a :index b}))))"
+
+         "(defn str-find [haystack needle]"
+         "  (let [i 0"
+         "        l (str-len haystack)]"
+         "    (while (and (!= i l) (!= (str-get haystack i) needle))"
+         "      (set i (+ i 1)))"
+         "    (if (!= i l) i nil)))"
                   
-                  "(defn vec-find [haystack needle]"
-                  "  (let [i 0"
-                  "        l (vec-len haystack)]"
-                  "    (while (and (!= i l) (!= (vec-get haystack i) needle))"
-                  "      (set i (+ i 1)))"
-                  "    (if (!= i l) i nil)))"
+         "(defn vec-find [haystack needle]"
+         "  (let [i 0"
+         "        l (vec-len haystack)]"
+         "    (while (and (!= i l) (!= (vec-get haystack i) needle))"
+         "      (set i (+ i 1)))"
+         "    (if (!= i l) i nil)))"
 
-                  "(defn find [haystack needle]"
-                  "  (cond ((vec? haystack)"
-                  "         (vec-find haystack needle))"
-                  "        ((str? haystack)"
-                  "         (str-find haystack needle))"
-                  "        (t (err \"find: unrecognized haystack type\""
-                  "                [needle haystack]))))",
-                  env);
+         "(defn find [haystack needle]"
+         "  (cond ((vec? haystack)"
+         "         (vec-find haystack needle))"
+         "        ((str? haystack)"
+         "         (str-find haystack needle))"
+         "        (t (err \"find: unrecognized haystack type\""
+         "                [needle haystack]))))"
 
-    shsl_eval_str("(defmacro with-log-level [body-ll & body]"
-                  "  (let [old-ll-sym (gensym \"old-log-level\")"
-                  "        body-res-sym (gensym \"body-res\")]"
-                  "    (let-code [old-ll-sym '(log-level)]"
-                  "      (list 'do"
-                  "            (list 'set-log-level! body-ll)"
-                  "            (set-code body-res-sym (do-code (vec->list body)))"
-                  "            (list 'set-log-level! old-ll-sym)"
-                  "            body-res-sym))))",
-                  env);
+         "(defn find-from [s start-ind test target]"
+         "  (let [i start-ind"
+         "        l (len s)]"
+         "    (while (and (< i l) (not (test (get s i) target)))"
+         "      (set i (+ i 1)))"
+         "    (and (< i l) i)))",
+         env);
+
+    // foreach-ing vectors and strings
+    shsl_eval_str
+        ("(defmacro s-foreach [elt-s & body]"
+         "  (let [elt (get elt-s 0)"
+         "        s (get elt-s 1)"
+         "        s-sym (gensym \"sequence\")"
+         "        i-sym (gensym \"iteration-index\")"
+         "        l-sym (gensym \"collection-length\")]"
+         "    (let*-code (list s-sym s"
+         "                     i-sym 0"
+         "                     l-sym (list 'len s-sym))"
+         "      (list"
+         "       (while-code (list '> l-sym i-sym)"
+         "         (list"
+         "          (cons"
+         "           'let"
+         "           (cons"
+         "            [elt (list 'get s-sym i-sym)]"
+         "            (vec->list"
+         "             (vec-cat"
+         "              body"
+         "              [(set-code i-sym (list '+ i-sym 1))]))))))))))",
+         env);
+
+    // (TODO) foreach-ing lists
+    // (TODO) foreach-ing a generic sequence
+
+    // splitting and joining sequences (well, vectors and strings)
+    shsl_eval_str
+        ("(defn split-on [elt s] "
+         "  (let* [next-slice-from"
+         "         (fn [i]"
+         "           (let* [next-slice-start (find-from s i != elt)"
+         "                  next-slice-end (and next-slice-start"
+         "                                      (find-from s next-slice-start = elt))]"
+         "             {:start next-slice-start"
+         "              :end (or next-slice-end (len s))"
+         "              }))"
+         "         acc []"
+         "         slice (next-slice-from 0)]"
+         "    (while (and (:start slice) (:end slice))"
+         "      (vec-push! acc (sub s (:start slice) (:end slice)))"
+         "      (set slice (next-slice-from (:end slice))))"
+         "    acc))"
+
+         "(defn join-with [sep ss]"
+         "  (let [acc []]"
+         "    (s-foreach [s-elt ss]"
+         "               (vec-push! acc sep)"
+         "               (vec-push! acc s-elt))"
+         "    (cond ((str? (get ss 0))"
+         "           (vec-set! acc 0 \"\")"
+         "           (str-cat-vec acc))"
+         ""
+         "          ((vec? (get ss 0))"
+         "           (vec-set! acc 0 [])"
+         "           (vec-cat-vec acc))"
+         ""
+         "          (t"
+         "           (err \"nuh uh\")))))",
+         env);
+
+    // subsequences of sequences
+    shsl_eval_str
+        ("(defn vec-sub [v a b]"
+         "  (if (or (< a 0) (< b 0) (> a (len v)) (> b (len v)))"
+         "    (err \"can't get subsequence of vector, some index is invalid\""
+         "         {:vec v :vec-length (len v) :start-index a :end-index b})"
+         "    (let [acc [] i a]"
+         "      (while (< i b)"
+         "        (vec-push! acc (get v i))"
+         "        (set i (+ i 1)))"
+         "      acc)))"
+
+         "(defn sub [s a b]"
+         "  (cond ((str? s) (str-sub s a b))"
+         "        ((vec? s) (vec-sub s a b))"
+         "        (t (err \"can't get subsequence of datum, not well defined\""
+         "                {:datum s :start-index a :end-index b}))))",
+         env);
+
+    // sequence lengths
+    shsl_eval_str
+        ("(defn lst-len [a]"
+         "  (let [l 0]"
+         "    (while (cons? a)"
+         "      (set a (cdr a))"
+         "      (set l (+ 1 l)))"
+         "    l))"
+
+         "(defn len [a]"
+         "  (cond ((str?  a) (str-len a))"
+         "        ((vec?  a) (vec-len a))"
+         "        ((cons? a) (lst-len a))"
+         "        ((nil?  a) 0)"
+         "        (t (err \"can't get length of datum, not well defined\" a))))",
+         env);
+
+    // logging and shit lengths
+    shsl_eval_str
+        ("(defmacro with-log-level [body-ll & body]"
+         "  (let [old-ll-sym (gensym \"old-log-level\")"
+         "        body-res-sym (gensym \"body-res\")]"
+         "    (let-code [old-ll-sym '(log-level)]"
+         "      (list 'do"
+         "            (list 'set-log-level! body-ll)"
+         "            (set-code body-res-sym (do-code (vec->list body)))"
+         "            (list 'set-log-level! old-ll-sym)"
+         "            body-res-sym))))",
+         env);
+    
     return env;
 }
 
@@ -5330,11 +5570,10 @@ char* shsl_read_file(const char *path) {
     }
 
     long long m = 0;
-#ifndef _WIN32
+    // https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/ftell-ftelli64?view=msvc-170
+    // ?
     m = ftell(f);
-#else
-    m = _telli64(_fileno(f));
-#endif
+
     if (m < 0 || fseek(f, 0, SEEK_SET)) {
         fprintf(stderr, "Could not read file %s: %s", path, strerror(errno));
         if(f) fclose(f);

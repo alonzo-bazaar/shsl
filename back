@@ -22,6 +22,9 @@ case "$1" in
         shift
         rr replay --gdb-x=gdb_shsl_shit "$@" -- -q
         ;;
+    'mingw')
+        x86_64-w64-mingw32-gcc -Wall -Wextra -Wpedantic -Werror -g3 -ggdb -o shsl shsl.c
+        ;; 
     'gcc')
         gcc -Wall -Wextra -Wpedantic -Werror -g3 -ggdb -o shsl shsl.c
         ;;

@@ -341,7 +341,8 @@ bool shsl_is_char_special_for_cmd_exe(char c) {
 // the cmd_exe flag tells us wether the command we're tryna run will be passed to
 // cmd.exe before running or not
 // if it is, take special care of the characters cmd.exe considers special
-void shsl_sb_win32_escaped_push(shsl_string_builder* sb, char c, bool cmd_exe) {
+void shsl_sb_win32_escaped_push(shsl_string_builder* sb,
+                                char c, bool cmd_exe) {
     if(cmd_exe && shsl_is_char_special_for_cmd_exe(c))
         shsl_sb_push(sb, '^');
     shsl_sb_push(sb, c);
@@ -350,7 +351,7 @@ void shsl_sb_win32_escaped_push(shsl_string_builder* sb, char c, bool cmd_exe) {
 void shsl_cmd_push_quoted_win32_arg(const char* arg, shsl_string_builder* sb,
                                     bool cmd_exe) {
     // starting quote
-    sb_push_and_maybe_escape(&sb, '"', cmd_exe);
+    shsl_sb_win32_escaped_push(sb, '"', cmd_exe);
 
     // handle characters of arg before adding ending quote
     const char* iter = arg;
@@ -370,9 +371,9 @@ void shsl_cmd_push_quoted_win32_arg(const char* arg, shsl_string_builder* sb,
         // totaling 2 * n_bs + 1 backslashes
         if(n_bs != 0 && *iter == '\0') {
             // '\\' isn't a special char for cmd.exe
-            // so we can we can avoid using sb_push_and_maybe_escape
+            // so we can we can avoid maybe escaping here
             for(int i = 2*n_bs+1; i!=0; i--)
-                sb_push(&sb, '\\');
+                shsl_sb_push(sb, '\\');
             break;
         }
 
@@ -385,8 +386,8 @@ void shsl_cmd_push_quoted_win32_arg(const char* arg, shsl_string_builder* sb,
         // this if also handles the case with a quote and n_bs=0 backslashes
         if(*iter == '"') {
             for(int i = 2*n_bs+1; i!=0; --i)
-                sb_push(&sb, '\\');
-            sb_push_and_maybe_escape(&sb, '"', cmd_exe);
+                shsl_sb_push(sb, '\\');
+            shsl_sb_win32_escaped_push(sb, '"', cmd_exe);
             iter++;
             continue;
         }
@@ -396,17 +397,17 @@ void shsl_cmd_push_quoted_win32_arg(const char* arg, shsl_string_builder* sb,
         // we don't increase iter here, as it's already past the backslashes
         if(n_bs != 0) {
             for(int i = n_bs; i!=0; --i)
-                sb_push(&sb, '\\');
+                shsl_sb_push(sb, '\\');
             continue;
         }
 
         // and finally, handle the normal case where it was just a character
-        sb_push_and_maybe_escape(&sb, *iter, cmd_exe);
+        shsl_sb_win32_escaped_push(sb, *iter, cmd_exe);
         iter++;
     }
 
     // ending quote
-    sb_push_and_maybe_escape(&sb, '"', cmd_exe);
+    shsl_sb_win32_escaped_push(sb, '"', cmd_exe);
 }
 
 // this is the big function which will turn an argv into a string we can pass to
@@ -415,7 +416,7 @@ void shsl_cmd_push_quoted_win32_arg(const char* arg, shsl_string_builder* sb,
 // uses the functions above to handle escaping
 char* shsl_cmd_to_win32_str(int argc, char** argv, bool cmd_exe) {
     shsl_string_builder sb = {0};
-    for(size_t i = 0; i<argc; ++i) {
+    for(int i = 0; i<argc; ++i) {
         // add whitespace separators
         if(i!=0)
             shsl_sb_push(&sb, ' ');
@@ -447,7 +448,8 @@ int shsl_exec(int argc, char** argv) {
     }
 
     bool should_escape_cmd_exe = false;
-    if(ends_with(argv[0], ".cmd") || ends_with(argv[0], ".bat"))
+    if(shsl_string_ends_with(argv[0], ".cmd") ||
+       shsl_string_ends_with(argv[0], ".bat"))
         should_escape_cmd_exe = true;
 
 #ifdef SHSL_WIN32_WARN_ON_NO_EXTENSION
@@ -467,7 +469,7 @@ int shsl_exec(int argc, char** argv) {
     si.cb = sizeof(si);
     ZeroMemory(&pi, sizeof(pi));
 
-    char* cmd_str = shsl_cmd_to_win32_str(cmd, should_escape_cmd_exe);
+    char* cmd_str = shsl_cmd_to_win32_str(argc, argv, should_escape_cmd_exe);
 
     // the win32 api is so beautiful
     if(CreateProcessA
@@ -522,7 +524,11 @@ int shsl_exec(int argc, char** argv) {
     return (int)exit_code;
 }
 
-char* shsl_exec_into_strs(int argc, char** argv) {
+int shsl_exec_into_strs(int argc, char** argv, char** outp, char** errp) {
+    (void)argc;
+    (void)argv;
+    (void)outp;
+    (void)errp;
     assert(0 && "TODO");
 }
 #endif // defined(SHSL_UNIX)
