@@ -2,6 +2,7 @@
 shsl
 test
 a.out
+*.exe
 
 # precompiled headers
 *.pch

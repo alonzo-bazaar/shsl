@@ -17,9 +17,11 @@ extern "C" {
 // https://web.archive.org/web/20160306052035/http://nadeausoftware.com/articles/2012/01/c_c_tip_how_use_compiler_predefined_macros_detect_operating_system
 #if defined(unix) || defined(__unix__) || defined(__unix) || defined(__linux__)
 #define SHSL_UNIX
+#define SHSL_NL "\n"
 #endif
 #if defined(_WIN32)
 #define SHSL_WIN32
+#define SHSL_NL "\r\n"
 #endif
 
 #include<stdio.h>
@@ -357,7 +359,7 @@ void shsl_map_set(shsl_ref map_obj,
 #define shsl_def_errtype_fn(type, name)                                 \
     type shsl_err_ ## name ## _fn                                       \
     (const char* errmsg, const unsigned int line, const char* file) {   \
-        fprintf(stderr, "some shit failed!\n%s\n", errmsg);             \
+        fprintf(stderr, "some shit failed!"SHSL_NL"%s"SHSL_NL, errmsg); \
         fprintf(stderr, "at line %u in file %s", line, file);           \
         exit(1);                                                        \
     }
@@ -760,7 +762,7 @@ size_t shsl_vlog(FILE* stream, SHSL_LOG_LEVEL log_level,
                 assert(0 && "you fucked somethig up with the log level");
         }
         acc+=vfprintf(stream, fmt, args);
-        acc+=fprintf(stream, "\n");
+        acc+=fprintf(stream, SHSL_NL);
     }
     return acc;
 }
@@ -1098,7 +1100,7 @@ shsl_ref shsl_ref_add(shsl_ref ref) {
     if(ref.is_weak) {
 #ifdef SHSL_LOG_ADD_REF
         shsl_log_info("[GC] not adding ref to object %p", (void*)(ref.ptr));
-        shsl_log_info("[GC] "); shsl_fpr(ref, stdout); fputc('\n', stdout);
+        shsl_log_info("[GC] "); shsl_fpr(ref, stdout); fputs(SHSL_NL, stdout);
         shsl_log_info("[GC] because ref is weak");
         shsl_log_info("[GC] remains at refcount %d", ref.ptr->ref_count);
         shsl_log_info("[GC] ");
@@ -1121,7 +1123,7 @@ void shsl_ref_drop(shsl_ref ref) {
     if(ref.is_weak) {
 #ifdef SHSL_LOG_DEL_REF
         shsl_log_info("[GC] not deleting ref to object %p", (void*)(ref.ptr));
-        shsl_log_info("[GC] "); shsl_fpr(ref, stdout); fputc('\n', stdout);
+        shsl_log_info("[GC] "); shsl_fpr(ref, stdout); fputs(SHSL_NL, stdout);
         shsl_log_info("[GC] because ref is weak");
         shsl_log_info("[GC] remains at refcount %d", ref.ptr->ref_count);
         shsl_log_info("[GC] ");
@@ -1131,7 +1133,7 @@ void shsl_ref_drop(shsl_ref ref) {
 
 #ifdef SHSL_LOG_DEL_REF
     shsl_log_info("[GC] deleting ref to object %p", (void*)(ref.ptr));
-    shsl_log_info("[GC] "); shsl_fpr(ref, stdout); fputc('\n', stdout);
+    shsl_log_info("[GC] "); shsl_fpr(ref, stdout); fputs(SHSL_NL, stdout);
     shsl_log_info("[GC] was at refcount %d", ref.ptr->ref_count);
     shsl_log_info("[GC] ");
 #endif    
@@ -1145,7 +1147,7 @@ void shsl_ref_drop(shsl_ref ref) {
 	// *else if*, not if
 	// having just if here is reading (potentially) freed data
 	// and that's no good
-	fprintf(stderr, "now you fucked up!\n");
+	fprintf(stderr, "now you fucked up!"SHSL_NL);
 }
 void shsl_ref_mark_weak(shsl_ref* ref) {
     if(!ref->is_weak) {
@@ -1312,7 +1314,7 @@ shsl_ref shsl_vmkerr(shsl_ref data, const char* msg, va_list args) {
 
     if(n >= 0 && shsl_should_log(SHSL_LOG_LEVEL_ERROR)) {
         shsl_log_err("%*s", n, buf);
-        shsl_log_err("with data:"); shsl_fpr(data, stderr); fputc('\n', stderr);
+        shsl_log_err("with data:"); shsl_fpr(data, stderr); fputs(SHSL_NL, stderr);
     }
 
     return_mallocd_obj(.ref_count = 0,
@@ -1460,7 +1462,7 @@ shsl_ref shsl_copy(shsl_ref ref) {
         case SHSL_BUILTIN_MACRO:
         case SHSL_USER_MACRO:
             fprintf(stderr,
-                    "[SHSL WARNING] function object not copyable!\n");
+                    "[SHSL WARNING] function object not copyable!"SHSL_NL);
             return shsl_ref_to_nil();
     }
     assert(0 && "unreachable");
@@ -1468,9 +1470,9 @@ shsl_ref shsl_copy(shsl_ref ref) {
 void shsl_free(shsl_ref ref) {
     assert(ref.ptr && "object should not be a null pointer!");
 #ifdef SHSL_LOG_GC
-    fprintf(stdout, "[SHSL GC] freeing object %p\n", (void*)(ref.ptr));
+    fprintf(stdout, "[SHSL GC] freeing object %p"SHSL_NL, (void*)(ref.ptr));
     shsl_fpr(ref, stdout);
-    fputc('\n', stdout);
+    fputs(SHSL_NL, stdout);
 #endif
     switch(shsl_type(ref)) {
         case SHSL_NIL:
@@ -1553,7 +1555,7 @@ void shsl_free(shsl_ref ref) {
     }
 
 #ifdef SHSL_LOG_GC
-    fprintf(stdout, "[SHSL GC] freed object %p\n", (void*)(ref.ptr));
+    fprintf(stdout, "[SHSL GC] freed object %p"SHSL_NL, (void*)(ref.ptr));
 #endif    
 }
 bool shsl_eq(shsl_ref lhs_ref, shsl_ref rhs_ref) {
@@ -1603,7 +1605,7 @@ bool shsl_eq(shsl_ref lhs_ref, shsl_ref rhs_ref) {
         case SHSL_USER_FN:
         case SHSL_BUILTIN_MACRO:
         case SHSL_USER_MACRO:
-            fprintf(stderr, "TODO: this comparison's not implemeneted yet!\n");
+            fprintf(stderr, "TODO: this comparison's not implemeneted yet!"SHSL_NL);
             return false;
     }
     assert(0 && "unreachable");
@@ -1675,7 +1677,7 @@ void shsl_vec_set(shsl_ref vec_ref, size_t i, shsl_ref new_val) {
 
     // TODO: gestione degli errori un po' di più magari
     if(i >= vec_ref.ptr->vec.size)
-	fprintf(stderr, "out of bounds array write!\n");
+	fprintf(stderr, "out of bounds array write!"SHSL_NL);
 
     shsl_ref_set(&vec_ref.ptr->vec.buf[i], new_val);
 }
@@ -2399,7 +2401,7 @@ parser_pair parse_until(const char* str,
         for(size_t i = 0; i<error_on_length; ++i)
             if(lp.token.type == error_on[i]) {
                 fprintf(stderr,
-                        "error: open parentheses \"%s\" closed by \"%s\"\n",
+                        "error: open parentheses \"%s\" closed by \"%s\""SHSL_NL,
                         stop == SHSL_TOK_CLOSE_PAREN ? "("
                         : stop == SHSL_TOK_CLOSE_SQUARE ? "["
                         : stop == SHSL_TOK_CLOSE_CURLY ? "{"
@@ -2536,7 +2538,8 @@ shsl_expr* shsl_vexpr_error(shsl_ref form, const char* msg, va_list args) {
 #ifdef SHSL_LOG_ERROR_EXPR
     shsl_log_err("[SHSL PARSER] %s", msg);
     shsl_log_err("[SHSL PARSER] with data:");
-    shsl_fpr(form, stderr); fputc('\n', stderr);
+    shsl_fpr(form, stderr);
+    fputs(SHSL_NL, stderr);
 #endif
     return_mallocd_expr(.type = SHSL_EXPR_LITERAL,
                         .literal = err);
@@ -4053,7 +4056,7 @@ shsl_ref shsl_eval_many_into_vec(shsl_expr** args, size_t args_length,
 #define shsl_fn_assert(ass) do {                                \
         if(!(ass))                                              \
             return shsl_mkerr(shsl_ref_to_nil(),                \
-                              "in function %s:\nAssertion ["    \
+                              "in function %s:"SHSL_NL"Assertion ["    \
                               #ass "] failed!", shsl_fn_name);  \
     } while(0)
 
@@ -4675,7 +4678,7 @@ shsl_defun(shsl_builtin_pr, "pr", args, env, {
     })
 shsl_defun(shsl_builtin_prn, "prn", args, env, {
         shsl_builtin_pr(args, env);
-        fputc('\n', stdout);
+        fputs(SHSL_NL, stdout);
         if(shsl_fn_argslen() == 0)
             return shsl_ref_to_nil();
         return shsl_fn_arg(0);
@@ -4693,7 +4696,7 @@ shsl_defun(shsl_builtin_print, "print", args, env, {
     })
 shsl_defun(shsl_builtin_println, "println", args, env, {
         shsl_builtin_print(args, env);
-        fputc('\n', stdout);
+        fputs(SHSL_NL, stdout);
         if(shsl_fn_argslen() == 0)
             return shsl_ref_to_nil();
         return shsl_fn_arg(0);
@@ -4811,7 +4814,8 @@ shsl_defun(shsl_builtin_log, "log", args, env, {
         const char* what = shsl_fn_arg(1).ptr->str;
         
         FILE* s = log_level==SHSL_LOG_LEVEL_INFO?stdout:stderr;
-        shsl_log(s, log_level, what); putc('\n', s);
+        shsl_log(s, log_level, what);
+        fputs(SHSL_NL, s);
         return shsl_ref_to_nil();
     })
 
@@ -4840,9 +4844,11 @@ void shsl_env_fix_circular_fn_refs(shsl_ref env) {
 */
 
 shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
-    shsl_env_def(env, shsl_mksym("nil"), shsl_ref_to_nil());
     shsl_ref t = shsl_mksym("t");
+    shsl_ref nil = shsl_ref_to_nil();
+
     shsl_env_def(env, t, t); // t is self evaluating
+    shsl_env_def(env, shsl_mksym("nil"), nil);
 
     // arithmetic operations 
     shsl_env_def(env, shsl_mksym("+"),
@@ -5001,18 +5007,27 @@ shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
     shsl_env_def(env, shsl_mksym("fnenv"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_fnenv));
 
-    // systemy functions
+    // systemy definitions
     shsl_env_def(env, shsl_mksym("exit"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_exit));
+#if defined(SHSL_UNIX)
+    shsl_env_def(env, shsl_mksym("unix?"), t);
+    shsl_env_def(env, shsl_mksym("win32?"), nil);
+#elif defined(SHSL_WIN32)
+    shsl_env_def(env, shsl_mksym("unix?"), nil);
+    shsl_env_def(env, shsl_mksym("win32?"), t);
+#else
+#error "unsupported platform (again)"
+#endif
 
-    // TODO: ctypes equivalent
+    // TODO: dlopen/ctypes equivalent?
     return env;
 }
 
 
 shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
     shsl_eval_str
-        (";; some basics we're just gonna need\n"
+        (";; some basics we're just gonna need\r\n"
          "(def defmacro"
          "  (macro [name args & body]"
          "         (cons 'def"
@@ -5032,7 +5047,7 @@ shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
          env);
 
     shsl_eval_str
-        (";; with due apologies to rich hickey\n"
+        (";; with due apologies to rich hickey\r\n"
          "(defn caar [l] (car (car l)))"
          "(defn cadr [l] (car (cdr l)))"
          "(defn cdar [l] (cdr (car l)))"
@@ -5050,12 +5065,12 @@ shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
          env);
 
     shsl_eval_str
-        (";; some small dumb utility things\n"
+        (";; some small dumb utility things\r\n"
          "(defn != [a b] (not (= a b)))",
          env);
 
     shsl_eval_str
-        (";; poor man's quasiquoting\n"
+        (";; poor man's quasiquoting\r\n"
          "(defn if-code [check then else]"
          "  (list 'if check then else))"
 
@@ -5091,7 +5106,7 @@ shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
          env);
 
     shsl_eval_str
-        (";; and now, time for hella macros\n"
+        (";; and now, time for hella macros\r\n"
          "(defmacro when [check & then]"
          "  (if-code check (do-code (vec->list then)) nil))"
 
@@ -5110,19 +5125,19 @@ shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
 
          "(defn let*-code [binds body]"
          " (cond"
-         "  ;; (> 2 (len binds))\n"
+         "  ;; (> 2 (len binds))\r\n"
          "  ((cddr binds)"
          "   (let-code [(car binds) (cadr binds)]"
          "    (let*-code (cddr binds) body)))"
-         "  ;; (> 1 (len binds)) (= 2)\n"
+         "  ;; (> 1 (len binds)) (= 2)\r\n"
          "  ((cdr binds)"
          "   (cons 'let (cons [(car binds) (cadr binds)] body)))"
-         "  ;; (> 0 (len binds)) (= 1)\n"
+         "  ;; (> 0 (len binds)) (= 1)\r\n"
          "  ((car binds)"
          "   (err"
          "    (str \"malformed let* bind, \""
          "         \"odd number of elements in bindings vector!\")))"
-         "  ;; (= 0 (len binds))\n"
+         "  ;; (= 0 (len binds))\r\n"
          "  (t body)))"
 
          "(defmacro let* [binds & body]"
@@ -5621,44 +5636,45 @@ void shsl_repl(shsl_ref env) {
     fprintf(stdout, "shsl> ");
     while(getline(&line, &linelen, stdin) != -1) {
         shsl_ref ref = shsl_eval_str(line, env);
-        fprintf(stdout, "=> "); shsl_fprint(ref, stdout); fputc('\n', stdout);
+        fprintf(stdout, "=> "); shsl_fprint(ref, stdout);
+        fputs(SHSL_NL, stdout);
         free(line);
         line = NULL;
-        fprintf(stdout, "\nshsl> ");
+        fprintf(stdout, SHSL_NL"shsl> ");
     }
     // once getline returns -1 it means eof
     // was it good eof or bad eof? let's ask errno!
     if(errno)
-        printf("\nwell fuck me then :/\n");
+        printf(SHSL_NL"well fuck me then :/"SHSL_NL);
     else
-        printf("\nbye bye :)\n");
+        printf(SHSL_NL"bye bye :)"SHSL_NL);
 }
 
 /// SHSL MAIN DEFINTIONS
 void shsl_usage(const char* name, bool print_extra, FILE* stream) {
     static char* msg =
-        "usage\n"
-        "%s [ | [<flag> [<flag operand>]]+ | <file> <file args>* ]\n"
-        "* %s by itself starts a repl\n"
-        "\n"
-        "* %s <file> <file args> runs file <file> passing it <file args>\n"
-        "  in the argv variable\n"
-        "\n"
-        "* %s [<flag> [<flag operand>]]+ the flags can be either:\n"
-        "   -e <str>  : evaluates string and prints result\n"
-        "   -f <file> : reads and evaluates everything in file\n"
-        "   -r starts a read eval print loop (repl)\n"
-        "   -h prints help message and exits\n";
+        "usage"SHSL_NL
+        "%s [ | [<flag> [<flag operand>]]+ | <file> <file args>* ]"SHSL_NL
+        "* %s by itself starts a repl"SHSL_NL
+        ""SHSL_NL
+        "* %s <file> <file args> runs file <file> passing it <file args>"SHSL_NL
+        "  in the argv variable"SHSL_NL
+        ""SHSL_NL
+        "* %s [<flag> [<flag operand>]]+ the flags can be either:"SHSL_NL
+        "   -e <str>  : evaluates string and prints result"SHSL_NL
+        "   -f <file> : reads and evaluates everything in file"SHSL_NL
+        "   -r starts a read eval print loop (repl)"SHSL_NL
+        "   -h prints help message and exits"SHSL_NL;
     static char* extra =
-        "\n"
-        "  multiple <flag> [<flag operand>]s can be put one after the other,\n"
-        "  in which case they will be evaluated in order\n"
-        "\n"
-        "  for instance:\n"
-        "  %s -e \"(def a 10)\" -f file.shsl -r \n"
-        "  will define a to be 10, run file.shsl with a bound to 10,\n"
-        "  and after all that, in the vm where the previous two flags were run,\n"
-        "  start a repl\n";
+        ""SHSL_NL
+        "  multiple <flag> [<flag operand>]s can be put one after the other,"SHSL_NL
+        "  in which case they will be evaluated in order"SHSL_NL
+        ""SHSL_NL
+        "  for instance:"SHSL_NL
+        "  %s -e \"(def a 10)\" -f file.shsl -r "SHSL_NL
+        "  will define a to be 10, run file.shsl with a bound to 10,"SHSL_NL
+        "  and after all that, in the vm where the previous two flags were run,"SHSL_NL
+        "  start a repl"SHSL_NL;
     fprintf(stream, msg, name, name, name, name);
     if(print_extra)
         fprintf(stream, extra, name);
@@ -5667,20 +5683,23 @@ void shsl_die(int exit_with, const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
     shsl_vlog(stderr, SHSL_LOG_LEVEL_FATAL, fmt, args);
-    fprintf(stderr, "\n");
+    fputs(SHSL_NL, stderr);
     va_end(args);
     exit(exit_with);
 }
 int shsl_main(shsl_ref env, const char* program_name, int argc, char** argv) {
+    // add some system definitions
+    // what's the executable called?
     shsl_env_def(env, shsl_mksym("progname"), shsl_mkstr(program_name));
-    // no args, default behaviour just start a repl
+    
+    // process argv:
+    // no args given? then default behaviour is to just start a repl
     if(argc == 0) {
         shsl_repl(env);
         return 0;
     }
 
-    // handle ./shsl [file] [args] case (mainly for shebangs)
-    // and ease in passing argv to shsl files
+    // or if called like ./shsl [file] [args] case
     if(argv[0][0] != '-') { // if first arg is not a flag
         shsl_ref shsl_argv = shsl_mkvec(argc-1);
         for(int i = 1; i<argc; ++i)
@@ -5693,7 +5712,7 @@ int shsl_main(shsl_ref env, const char* program_name, int argc, char** argv) {
 
     shsl_env_def(env, shsl_mksym("argv"), shsl_mkvec(0));
 
-    // iterate and execute all
+    // iterate and execute all flags
     int i = 0;
     while(i<argc) {
         if(strcmp(argv[i], "-e") == 0) {
@@ -5723,7 +5742,7 @@ int shsl_main(shsl_ref env, const char* program_name, int argc, char** argv) {
             return 0;
         }
         else {
-            fprintf(stderr, "'%s' unrecognized flag!!\n", argv[i]);
+            fprintf(stderr, "'%s' unrecognized flag!!"SHSL_NL, argv[i]);
             shsl_usage(program_name, false, stderr);
             return 1;
         }

@@ -171,25 +171,27 @@ The following is a [[https://learnxinyminutes.com/][learnxinyminutes]] style run
   ;; (TO BE CONTINUED...)
 #+end_src
 
-* Repo structure
+* Repo tour
 - ~shsl.h~ :: the master file, the entire langauge is defined in here
 - ~shsl.c~ :: thin main function
-- ~Makefile~ :: Makefile
+- ~make.shsl~ :: build script
+- ~back~ :: backup build script (the main script depends on ~shsl~ so if shsl is broken so is the build script) 
 - ~examples/~ :: various examples of shsl scripts, all the scripts in this directory can be run with the current shsl version
-- ~ramblings/~ :: various notes to self I felt the need to version
+- ~ramblings/~ :: various notes to self i felt the need to version
 - ~docs/~ :: (currently absent) documentation
+- ~aids/~ :: programs used to aid in either the testing or deveoping of shsl, not part of shsl the program, but part of shsl the infrastructure around the program
 
-* TODO's and the like
-- [X] get language to a usable state
+* Todo's and the like
+- [x] get language to a usable state
 - [ ] fix leaks when lexer or parser return an error
 - [-] tests
-  - [X] lotsa of tests
+  - [x] lotsa of tests
   - [ ] but like, loooooootsa of tests
 - [ ] better documentation
-- [ ] CFFI through a ctypes like library
+- [ ] cffi through a ctypes like library
   - may incur in a dependency on libffi, put behind a macro to allow for shsl to be compiled without the dependancy as well
 - [-] ~exec~ functions for scripting
-  - [X] ~exec~ function for posix and win32
+  - [x] ~exec~ function for posix and win32
   - [-] ~exec-parallel~ functions for posix and win32
   - [-] ~exec-pipeline~ functions for posix and win32
   - [-] ~exec-into-str~ functions for posix and win32
@@ -200,9 +202,29 @@ The following is a [[https://learnxinyminutes.com/][learnxinyminutes]] style run
 - [ ] support for more memory management schemas
   - [ ] implement mark and sweep and have an interface that can accomodate mark and sweep
   - [ ] (optionally) integrate ~libgc~ and have an interface that can accomodate taht as well (behind a preprocessor flag as it would otherwise incur in a mandatory dependency)
-- [X] support for lisp macros
-- [ ] test on windows (likely to be done through mingw and wine)
+- [x] support for lisp macros
+- [-] test on windows (likely to be done through mingw and wine)
 - [ ] keyword arguments
-- [X] variadics
+- [x] variadics
 
-* Similar projects
+* Similar Projects
+** C side
+- [[https://github.com/tsoding/nob.h/][nob.h]] :: is another approach to "just shove this file in your project and you have a build system/command runner/anything really", tho it's provided as a C library and not as the rather nuclear option I went with of making an entire language instead
+- [[https://github.com/nothings/stb/][stb libraries]] :: which have saved my ass on many occasions and been a great inspiration for "yoooo, I can put a file in there, and I'm done, duuuuuude"
+
+** Clojure/Lisp side
+- [[https://github.com/babashka/babashka][babashka]] :: which is objectviely better at doing everything I'm trying to do here, by most conceivable metrics that are not related to the c programming langauge
+- [[https://github.com/jank-lang/jank][jank]] :: which is /also/ objectviely better at doing everything I'm trying to do here, by most conceivable metrics that are not related to being a single header library
+- [[https://github.com/JeffBezanson/femtolisp/blob/master/tiny/lisp.c][femtolisp]] :: which is /also, also/ objectviely better at doing everything I'm trying to do here, by most metrics that are not related to being a tiny "clojure" and not a tiny scheme (quotes 'cause this is barely considerable a clojure)
+- [[https://github.com/kanaka/mal][mal (make a lisp)]] :: which continues the retroactive tradition of this same idea having been done infinitely better several times already
+
+* Credits
+- the ~shsl_read_whole_file~ function is largely based on [[https://github.com/tsoding/nob.h/blob/c54fde95599c15b881472087d4956e290f397d65/nob.h#L2564][nob_read_entire_file]]
+- plenty code from [[https://github.com/tsoding/nob.h/][nob.h]] was also partially snarfed for ~shsl_exec.h~ but the theft is far less localized so I can't provide credit for any point in particular
+- [[https://learn.microsoft.com/en-gb/archive/blogs/twistylittlepassagesallalike/everyone-quotes-command-line-arguments-the-wrong-way][this article]] was used for the command quoting logic for win32
+
+* Special thanks
+- [[https://codeberg.org/ThePlaneOnGit][ThePlaneOnGit]] :: for helping with the rather questionalbe ~memcpy~ hack I had to use to making constant struct fields bearable
+- [[https://github.com/Bike][Bike]] :: for telling me about the [[https://rr-project.org/][rr debugger]] which I would have gone insane without while developing this
+- [[https://rr-project.org/][the rr debugger]] :: just go install this debugger, it's amazing
+- the idea for shsl originated from [[https://www.youtube.com/watch?v=G4Ugv18tJ5E&t=7m10s][here]], so I suppose I should also thank [[https://github.com/tsoding][tsoding]] and cephon altera for the idea (can't find a link for cephon altera)

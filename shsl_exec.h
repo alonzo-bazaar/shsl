@@ -18,11 +18,9 @@ extern "C" {
 #if defined(SHSL_UNIX)
 #include<unistd.h>   // fork, exec, pipe &Co.
 #include<sys/wait.h> // waitpid &Co.
-#define SHSL_NL "\n"
 
 #elif defined(SHSL_WIN32)
 #include<windows.h>  // win32 and a lot of prayers
-#define SHSL_NL "\r\n"
 
 #else
 #error "unsupported platform!"
@@ -44,9 +42,9 @@ shsl_ref shsl_builtin_exec_vec_strs(shsl_ref args, shsl_ref env);
 shsl_ref shsl_env_add_exec_definitions(shsl_ref env);
 shsl_ref shsl_env_eval_execlib(shsl_ref env);
 
-#define shsl_log_errno()                                                \
-    fprintf(stderr, "at line %d of file %s\n"                           \
-            "errno is %d: meaning %s\n\n",                              \
+#define shsl_log_errno()                                \
+    fprintf(stderr, "at line %d of file %s" SHSL_NL     \
+            "errno is %d: meaning %s" SHSL_NL SHSL_NL,  \
             __LINE__, __FILE__, errno, strerror(errno))
 
 // error reporting wrappers
@@ -130,7 +128,7 @@ int shsl_syscall_warn(int call_ret, const char* callexpr,
         shsl_log_warn("system call %s", callexpr);
         shsl_log_warn("at line %d of file %s", linenum, filename);
         shsl_log_warn("returned %d", call_ret);
-        shsl_log_warn("errno is %d (%s)\n", errno, strerror(errno));
+        shsl_log_warn("errno is %d (%s)"SHSL_NL, errno, strerror(errno));
     }
     return call_ret;
 }
@@ -224,9 +222,11 @@ int shsl_exec_into_strs(int argc, char** argv, char** outp, char** errp) {
         goto end;
     if(kid == 0) {
         if(SHSL_GRAB_STDOUT_FROM_PIPE(out_p) == -1)
-            shsl_die(EXIT_FAILURE, "child failed to bind stdout to pipe output\n");
+            shsl_die(EXIT_FAILURE,
+                     "child failed to bind stdout to pipe output" SHSL_NL);
         if(SHSL_GRAB_STDERR_FROM_PIPE(err_p) == -1)
-            shsl_die(EXIT_FAILURE, "child failed to bind stderr to pipe output\n");
+            shsl_die(EXIT_FAILURE,
+                     "child failed to bind stderr to pipe output" SHSL_NL);
         SHSL_EXECVP(argv);
     }
     else {
@@ -440,10 +440,50 @@ char* shsl_cmd_to_win32_str(int argc, char** argv, bool cmd_exe) {
     return shsl_sb_get(&sb);
 }
 
+#ifdef SHSL_WIN32_WARN_ON_NO_EXTENSION
+void maybe_warn_no_extension(const char* exename) {
+    shsl_log_warn
+        ("running executable without specifying file extension!");
+    shsl_log_warn
+        ("cannot determine wether to treat executable as batch file!");
+    shsl_log_warn
+        ("this operation can be dangerous, please make sure you're");
+    shsl_log_warn
+        ("not passing any unsanitized user input to this function.");
+    shsl_log_warn("okthxbye <3"SHSL_NL);
+}
+#else
+#define maybe_warn_no_extension()
+#endif // SHSL_WIN32_WARN_ON_NO_EXTENSION
+
+void shsl_log_win32_error(DWORD error, const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    shsl_vlog(stderr, SHSL_LOG_LEVEL_ERROR, fmt, args);
+    va_end(args);
+
+    // think of error as errno
+    // and of the following code as puts(strerror(errno))
+    // just... more microsofty
+
+    // https://stackoverflow.com/questions/1387064/how-to-get-the-error-message-from-the-error-code-returned-by-getlasterror
+    // https://learn.microsoft.com/en-us/windows/win32/api/errhandlingapi/nf-errhandlingapi-getlasterror#syntax
+    // https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-formatmessage#syntax
+    char buf[1024] = {0};
+    FormatMessageA
+        (FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+         NULL,
+         error,
+         MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+         buf, 1024,
+         NULL);
+    shsl_log_err("%s"SHSL_NL, buf);
+}
+
 // https://learn.microsoft.com/en-us/windows/win32/procthread/creating-processes
 int shsl_exec(int argc, char** argv) {
     if(argc == 0) {
-        shsl_log_err("cannot execute empty command!\n");
+        shsl_log_err("cannot execute empty command!"SHSL_NL);
         return -1;
     }
 
@@ -452,16 +492,10 @@ int shsl_exec(int argc, char** argv) {
        shsl_string_ends_with(argv[0], ".bat"))
         should_escape_cmd_exe = true;
 
-#ifdef SHSL_WIN32_WARN_ON_NO_EXTENSION
     if(strpbrk(argv[0], ".") == NULL) {
-        shsl_log_warn("running executable without specifying file extension!");
-        shsl_log_warn("cannot determine wether to treat executable as batch file!");
-        shsl_log_warn("this operation can be dangerous, please make sure you're");
-        shsl_log_warn("not passing any unsanitized user input to this function.");
-        shsl_log_warn("okthxbye <3\n");
         should_escape_cmd_exe = false;
+        maybe_warn_no_extension();
     }
-#endif
 
     STARTUPINFO si;
     PROCESS_INFORMATION pi;
@@ -469,47 +503,37 @@ int shsl_exec(int argc, char** argv) {
     si.cb = sizeof(si);
     ZeroMemory(&pi, sizeof(pi));
 
-    char* cmd_str = shsl_cmd_to_win32_str(argc, argv, should_escape_cmd_exe);
+    char* cmd_str = shsl_cmd_to_win32_str(argc, argv,
+                                          should_escape_cmd_exe);
 
-    // the win32 api is so beautiful
-    if(CreateProcessA
-       (NULL,                             // no module name
-        cmd_str,                          // command line string
-        NULL, NULL, FALSE, 0, NULL, NULL, // buncha shit 'n flags
-        &si, &pi                          // output params
-       ) == 0) {
-        // if we get here we encountered an error while creating process
-        // to get the message releated to the error (think strerror(errno))
-        // 
-        // https://stackoverflow.com/questions/1387064/how-to-get-the-error-message-from-the-error-code-returned-by-getlasterror
-        // https://learn.microsoft.com/en-us/windows/win32/api/errhandlingapi/nf-errhandlingapi-getlasterror#syntax
-        // https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-formatmessage#syntax
-        DWORD last_error = GetLastError();
-        char buf[1024] = {0};
-        FormatMessageA
-            (FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-             NULL,
-             last_error,
-             MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-             buf, 1024,
-             NULL);
-        
-        fprintf(stderr, "%s", buf);
+    BOOL created_successfully = CreateProcessA
+        (NULL,                             // no module name
+         cmd_str,                          // command line string
+         NULL, NULL, FALSE, 0, NULL, NULL, // buncha shit 'n flags
+         &si, &pi);                        // output params
+
+    if(!created_successfully) {
+        shsl_log_win32_error
+            (GetLastError(),
+             "an error occured while creating child process!"SHSL_NL);
         return -1;
     }
 
-    // if we're not in the if then it's all fine and dandy, process creation succeded
+    // if we're not in the if then it's all fine and dandy
+    // process creation succeded, process exists and is doing its thing
     // wait for process to exit
     WaitForSingleObject(pi.hProcess, INFINITE);
 
     // LPDWORD is just a pointer to DWORD
     // DWORD is just uint32_t
     // https://learn.microsoft.com/en-us/windows/win32/winprog/windows-data-types
-
+    // which means when calling GetExitCodeProcess...
     // https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getexitcodeprocess
     DWORD exit_code;
     if(!GetExitCodeProcess(pi.hProcess, &exit_code)) {
-        fprintf(stderr, "failed to obtain return value of process!\n");
+        shsl_log_win32_error
+            (GetLastError(),
+             "failed to obtain return value of process!"SHSL_NL);
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread); 
         return -1;
@@ -525,11 +549,174 @@ int shsl_exec(int argc, char** argv) {
 }
 
 int shsl_exec_into_strs(int argc, char** argv, char** outp, char** errp) {
-    (void)argc;
-    (void)argv;
-    (void)outp;
-    (void)errp;
-    assert(0 && "TODO");
+    // business as usual
+    if(argc == 0) {
+        shsl_log_err("cannot execute empty command!"SHSL_NL);
+        return -1;
+    }
+
+    bool should_escape_cmd_exe = false;
+    if(shsl_string_ends_with(argv[0], ".cmd") ||
+       shsl_string_ends_with(argv[0], ".bat"))
+        should_escape_cmd_exe = true;
+
+    if(strpbrk(argv[0], ".") == NULL) {
+        should_escape_cmd_exe = false;
+        maybe_warn_no_extension();
+    }
+
+    char* cmd_str = shsl_cmd_to_win32_str(argc, argv,
+                                          should_escape_cmd_exe);
+
+    // now for the redirect part:
+    // win32 api doesn't have fork exec
+    // which means you can't fork, set shit up, then exec
+    // which means you have to create the process and have all the shit already
+    // set up
+    // 
+    // in the code you gotta write, this translates to having to prepopulate
+    // a whole bunch of metadata structs and shit and already knowing 
+    // everything the starting child process must know before you call
+    // CreateProcess
+    // 
+    // you can't do the setup in the child process like in fork exec, you have
+    // to do all the setup in the parent process
+
+    // to pass pipes to child we must have the child inherit the stream handles
+    // when creating a pipe, the inheritance of the stream handles that pipe
+    // connects are controlled by a SECURITY_ATTRIBUTES you pass to CreatePipe
+    // so let's create a SECURITY_ATTRIBUTES that tells CreatePipe to make
+    // the pipe handles inheritable by child processes
+    SECURITY_ATTRIBUTES sec_attrs = {};
+    sec_attrs.nLength = sizeof(SECURITY_ATTRIBUTES);
+    sec_attrs.bInheritHandle = TRUE;
+    sec_attrs.lpSecurityDescriptor = NULL;
+    
+    // and create the handles to pipe the child's stdout (and stderr) to 
+    // handles that we control
+    HANDLE child_stdout_write = NULL; // child output goes here
+    HANDLE child_stdout_read = NULL;  // and we'll read it from here
+
+    HANDLE child_stderr_write = NULL; // child error goes here
+    HANDLE child_stderr_read = NULL;  // and we'll read it from here
+
+    if(!CreatePipe(&child_stdout_read, &child_stdout_write, &sec_attrs, 0)) {
+        shsl_log_win32_error
+            (GetLastError(),
+            "failed to create pipe to child process standard output");
+        return -1;
+    }
+    if(!SetHandleInformation(child_stdout_read, HANDLE_FLAG_INHERIT, 0)) {
+        shsl_log_win32_error
+            (GetLastError(),
+            "failed to set handle information for child process standard output");
+        return -1;
+    }
+    if(!CreatePipe(&child_stderr_read, &child_stderr_write, &sec_attrs, 0)) {
+        shsl_log_win32_error
+            (GetLastError(),
+            "failed to create pipe to child process standard error");
+        return -1;
+    }
+
+    if(!SetHandleInformation(child_stderr_read, HANDLE_FLAG_INHERIT, 0)) {
+        shsl_log_win32_error
+            (GetLastError(),
+            "failed to set handle information for child process standard error");
+        return -1;
+    }
+
+    // now that we created the stream handles we have to write somewhere that the
+    // child process should use these stream handles as its stdout and stderr 
+    // we do this in a STARTUPINFO that we're gonna pass to CreateProcess
+    // create a STARTUPINFO that tells the child to use the stdout and stderr we control
+    STARTUPINFO startup_info;
+    ZeroMemory(&startup_info, sizeof(STARTUPINFO)); // hygene first
+    startup_info.cb = sizeof(STARTUPINFO);
+    startup_info.hStdOutput = child_stdout_write;
+    startup_info.hStdError  = child_stderr_write;
+    startup_info.dwFlags |= STARTF_USESTDHANDLES;
+
+    // CreateProcess also takes a PROCESS_INFORMATION which it uses as an out parameter
+    // since C doesn't have multiple returns you give it a pointer to a 
+    // PROCESS_INFORMATION and CreateProcess will populate it with a bunch of info
+    // about the child process which the parent may need to wait on it, disown it, or 
+    // whatever it is parents do
+    PROCESS_INFORMATION process_info;
+    ZeroMemory(&process_info, sizeof(PROCESS_INFORMATION));
+
+    BOOL success = CreateProcessA
+        (NULL,           // always NULL, a module or something
+         cmd_str,        // child command line
+         NULL,           // security attributes for child process
+         NULL,           // security attributes for child process primary thread
+         TRUE,           // flag for controlling wether handles are inherited
+         0,              // flags for process creation
+         NULL,           // child environment variables (if NULL use parent's)
+         NULL,           // child initial working directory (if NULL use parent's)
+         &startup_info,  // child process startup info
+         &process_info); // struct to populate with info about the child process
+    if(!success) {
+        shsl_log_win32_error
+            (GetLastError(),
+            "failed to create child process");
+        return -1;
+    }
+
+    // we don't need the child stdout and stderr handles, and keeping them open could
+    // lead to a lot of problems 'cause processes reading from them can't tell when
+    // are they done if the child closes them but we keep them open
+    // so we should not keep them open
+    CloseHandle(child_stderr_write);
+    CloseHandle(child_stdout_write);
+
+    // collect child output
+    DWORD n_read = 0;
+    const size_t BUFSIZE = 4096;
+    char buf[BUFSIZE]; ZeroMemory(buf, sizeof(buf));
+
+    shsl_string_builder out_sb = {0};
+    shsl_string_builder err_sb = {0};
+
+    // collect standard out
+    while(true) {
+        BOOL read_success = ReadFile(child_stdout_read, buf,
+                                     BUFSIZE, &n_read, NULL);
+        if(!read_success) {
+            shsl_log_win32_error
+                (GetLastError(),
+                 "failed read from process stdout");
+            if(out_sb.buf) free(out_sb.buf);
+            return -1;
+        }
+        if(n_read == 0)
+            break;
+        shsl_sb_push_sized_str(&out_sb, buf, n_read);
+    }
+
+    // collect standard err
+    while(true) {
+        BOOL read_success = ReadFile(child_stderr_read, buf,
+                                     BUFSIZE, &n_read, NULL);
+        if(!read_success) {
+            shsl_log_win32_error
+                (GetLastError(),
+                 "failed read from process stderr");
+            if(out_sb.buf) free(out_sb.buf);
+            if(err_sb.buf) free(err_sb.buf);
+            return -1;
+        }
+        if(n_read == 0)
+            break;
+        shsl_sb_push_sized_str(&err_sb, buf, n_read);
+    }
+
+    shsl_sb_push(&out_sb, '\0');
+    shsl_sb_push(&err_sb, '\0');
+    *outp = shsl_sb_get(&out_sb);
+    *errp = shsl_sb_get(&err_sb);
+
+    return 0;
 }
 #endif // defined(SHSL_UNIX)
 
