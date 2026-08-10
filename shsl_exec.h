@@ -745,7 +745,7 @@ void shsl_strvec_to_argc_argv(shsl_ref strvec, int* argc_ptr, char*** argv_ptr) 
     argc = shsl_vec_length(strvec);
     argv = SHSL_ARR_ALLOC(char*, argc+1);
     shsl_vec_foreach(i, elt, strvec)
-        argv[i] = elt.ptr->str;
+        argv[i] = elt.ptr->str.buf;
     argv[argc] = NULL;
 
     *argc_ptr = argc;

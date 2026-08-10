@@ -175,6 +175,7 @@ shsl_defstruct(shsl_obj);
 // possible shsl objects
 // (outside of primitive types for which we just use the C ones)
 shsl_defstruct(shsl_sym);
+shsl_defstruct(shsl_str);
 shsl_defstruct(shsl_err);
 shsl_defstruct(shsl_cons);
 shsl_defstruct(shsl_vec);
@@ -433,6 +434,7 @@ ssize_t shsl_list_length(shsl_ref list_ref);
 /// CONVENIENCE GETTERS DECLARATIONS
 long shsl_int(shsl_ref ref);
 double shsl_real(shsl_ref ref);
+const char* shsl_get_str(shsl_ref sym_ref);
 const char* shsl_sym_name(shsl_ref sym_ref);
 bool shsl_sym_is_kword(shsl_ref sym);
 
@@ -995,6 +997,11 @@ typedef struct shsl_ref {
     bool is_weak;
 } shsl_ref;
 
+typedef struct shsl_str {
+    char* buf;
+    const size_t size;
+} shsl_str;
+
 typedef struct shsl_sym {
     const shsl_ref name; // must be string
 } shsl_sym ;
@@ -1055,7 +1062,7 @@ typedef struct shsl_obj {
         const char c;
         const bool b;
         const void* vptr;
-	char* str;
+	const shsl_str str;
 
 	const shsl_sym sym;
 	shsl_cons cons;
@@ -1319,7 +1326,11 @@ shsl_ref shsl_mkstr_nocopy(char* str) {
     if(!str)
         str = slice_to_fresh_str("", 0);
 
-    return_mallocd_obj(.ref_count = 0, .type = SHSL_STR, .str = str);
+    size_t ssz = strlen(str);
+
+    return_mallocd_obj(.ref_count = 0,
+                       .type = SHSL_STR,
+                       .str = (shsl_str){.buf = str, .size = ssz});
 }
 shsl_ref shsl_mksym_nocopy(char* name) {
     return_mallocd_obj(.ref_count = 0,
@@ -1354,7 +1365,7 @@ shsl_ref shsl_vmkerr(shsl_ref data, const char* msg, va_list args) {
     int n = vsprintf(buf, msg, args);
 
     if(n >= 0 && shsl_should_log(SHSL_LOG_LEVEL_ERROR)) {
-        shsl_log_err("%*s", n, buf);
+        shsl_log_err("%.*s", n, buf);
         shsl_log_err("with data:"); shsl_fpr(data, stderr); fputs(SHSL_NL, stderr);
     }
 
@@ -1471,16 +1482,16 @@ shsl_ref shsl_mkuser_macro(shsl_ref env, shsl_lambda_list* lambda_list,
 shsl_ref shsl_copy(shsl_ref ref) {
     switch(shsl_type(ref)) {
         case SHSL_NIL:    return shsl_ref_to_nil();
-        case SHSL_SYM:    return shsl_mksym(ref.ptr->sym.name.ptr->str);
+        case SHSL_SYM:    return shsl_mksym(ref.ptr->sym.name.ptr->str.buf);
         case SHSL_CHAR:   return shsl_mkchar(ref.ptr->c);
         case SHSL_BOOL:   return shsl_mkbool(ref.ptr->b);
         case SHSL_VPTR:   return shsl_mkvptr(ref.ptr->vptr);
         case SHSL_INT:    return shsl_mkint(ref.ptr->i);
         case SHSL_REAL:   return shsl_mkint(ref.ptr->r);
-        case SHSL_STR:    return shsl_mkstr(ref.ptr->str);
+        case SHSL_STR:    return shsl_mkstr(ref.ptr->str.buf);
 
         case SHSL_ERR:    return shsl_mkerr(shsl_copy(ref.ptr->err.data),
-                                            ref.ptr->err.msg.ptr->str);
+                                            ref.ptr->err.msg.ptr->str.buf);
 
         case SHSL_CONS:   return shsl_mkcons(shsl_copy(ref.ptr->cons.car),
                                              shsl_copy(ref.ptr->cons.cdr));
@@ -1525,7 +1536,7 @@ void shsl_free(shsl_ref ref) {
             break;
 
         case SHSL_STR:
-            free(ref.ptr->str);
+            free(ref.ptr->str.buf);
             free(ref.ptr);
             break;
 
@@ -1614,9 +1625,9 @@ bool shsl_eq(shsl_ref lhs_ref, shsl_ref rhs_ref) {
         case SHSL_NIL:
             return true;
         case SHSL_SYM:
-            return strcmp(lhs->sym.name.ptr->str, rhs->sym.name.ptr->str) == 0;
+            return shsl_eq(lhs->sym.name, rhs->sym.name);
         case SHSL_ERR:
-            return strcmp(lhs->err.msg.ptr->str, rhs->err.msg.ptr->str) == 0
+            return shsl_eq(lhs->err.msg,  rhs->err.msg)
                 && shsl_eq(lhs->err.data, lhs->err.data);
 
         case SHSL_INT:
@@ -1630,7 +1641,7 @@ bool shsl_eq(shsl_ref lhs_ref, shsl_ref rhs_ref) {
         case SHSL_REAL:
             return lhs->r == rhs->r;
         case SHSL_STR:
-            return strcmp(lhs->str, rhs->str) == 0;
+            return strcmp(lhs->str.buf, rhs->str.buf) == 0;
 
         case SHSL_CONS:
             return shsl_eq(lhs->cons.car, rhs->cons.car)
@@ -1979,8 +1990,17 @@ double shsl_real(shsl_ref ref) {
     assert(shsl_is_int(ref) || shsl_is_real(ref));
     return shsl_is_int(ref)?(double)ref.ptr->i:ref.ptr->r;
 }
+const char* shsl_get_str(shsl_ref ref) {
+    assert(shsl_is_str(ref));
+    const char* buf = ref.ptr->str.buf;
+    const size_t sz = ref.ptr->str.size;
+    assert (buf[sz] == '\0'); // TODO: may wanna allow for arbitrary string views
+                              // and shit, but like, later
+    return buf;
+}
 const char* shsl_sym_name(shsl_ref sym_ref) {
-    return sym_ref.ptr->sym.name.ptr->str;
+    assert(shsl_is_sym(sym_ref));
+    return shsl_get_str(sym_ref.ptr->sym.name);
 }
 bool shsl_sym_is_kword(shsl_ref sym) {
     assert(shsl_is_sym(sym));
@@ -4457,13 +4477,13 @@ shsl_defun(shsl_builtin_err, "err", args, env, {
         // I wanted to support formatted errors so it made more sense
         // to have the (format) string at the end with the formatted shit
         if(shsl_fn_argslen() == 2)
-            return shsl_mkerr(shsl_fn_arg(1), shsl_fn_arg(0).ptr->str);
+            return shsl_mkerr(shsl_fn_arg(1), shsl_fn_arg(0).ptr->str.buf);
 
         shsl_cb rest_builder = shsl_cb_make(SHSL_CB_LIST);
         for(size_t i = 1; i<shsl_fn_argslen(); ++i)
             shsl_cb_add(&rest_builder, shsl_fn_arg(i));
 
-        return shsl_mkerr(shsl_cb_get(rest_builder), shsl_fn_arg(0).ptr->str);
+        return shsl_mkerr(shsl_cb_get(rest_builder), shsl_fn_arg(0).ptr->str.buf);
     })
 
 // some more common-lisp-y data functions (I just kinda miss car and cdr)
@@ -4535,6 +4555,32 @@ shsl_defun(shsl_builtin_str, "str", args, env, {
 
 // (substr "string" start) = substring from that point to the end of the string
 // (substr "string" start end) = substring from a to b (b excluded, of course)
+shsl_defun(shsl_builtin_str_at, "str-at", args, env, {
+        (void)env;
+        shsl_fn_assert_argslen(== 2);
+        shsl_fn_assert_argtype(0, SHSL_STR);
+        shsl_fn_assert_argtype(1, SHSL_INT);
+        ssize_t si = shsl_int(shsl_fn_arg(1));
+        if(si < 0)
+            return shsl_mkerr
+                (shsl_kwmap_fromelts(":index", shsl_fn_arg(1),
+                                     ":indexed-string", shsl_fn_arg(0)),
+                 "str-at: cannot index into string using negative index");
+
+        size_t i = si;
+        if (i >= shsl_fn_arg(0).ptr->str.size)
+            return shsl_mkerr
+                (shsl_kwmap_fromelts(":index",
+                                     shsl_fn_arg(1),
+                                     ":indexed-string",
+                                     shsl_fn_arg(0),
+                                     ":string-length",
+                                     shsl_mkint(shsl_fn_arg(0).ptr->str.size)),
+                 "str-at: index out of bounds for string length");
+
+        return shsl_mkchar(shsl_fn_arg(0).ptr->str.buf[i]);
+    })
+
 shsl_defun(shsl_builtin_substr, "str-sub", args, env, {
         (void)env;
         shsl_fn_assert_argslen(>= 2);
@@ -4544,7 +4590,7 @@ shsl_defun(shsl_builtin_substr, "str-sub", args, env, {
         if(shsl_fn_argslen() == 3)
             shsl_fn_assert_argtype(2, SHSL_INT);
 
-        const char* in_buf = shsl_fn_arg(0).ptr->str;
+        const char* in_buf = shsl_fn_arg(0).ptr->str.buf;
         const size_t sl = strlen(in_buf);
         const ssize_t start_s = shsl_int(shsl_fn_arg(1));
         const ssize_t end_s = shsl_fn_argslen()==3
@@ -4595,7 +4641,7 @@ shsl_defun(shsl_builtin_strcat, "str-cat", args, env, {
 
         shsl_string_builder sb = {0};
         shsl_vec_foreach(i, arg, args)
-            shsl_sb_push_nullt_str(&sb, arg.ptr->str);
+            shsl_sb_push_sized_str(&sb, arg.ptr->str.buf, arg.ptr->str.size);
 
         shsl_sb_push(&sb, '\0');
         return shsl_mkstr_nocopy(shsl_sb_get(&sb)); 
@@ -4612,7 +4658,7 @@ shsl_defun(shsl_builtin_strlen, "str-len", args, env, {
         (void)env;
         shsl_fn_assert_argslen(== 1);
         shsl_fn_assert_argtype(0, SHSL_STR);
-        return shsl_mkint(strlen(shsl_fn_arg(0).ptr->str));
+        return shsl_mkint(shsl_fn_arg(0).ptr->str.size);
     })
 
 /// BUILTIN VECTOR FUNCTIONS DEFINITIONS
@@ -4796,13 +4842,13 @@ shsl_defun(shsl_builtin_contains, "contains?", args, env, {
     })
 shsl_defun(shsl_builtin_count, "count", args, env, {
         (void)env;
-        shsl_fn_assert_argslen(== 2);
+        shsl_fn_assert_argslen(== 1);
         shsl_ref col = shsl_fn_arg(0);
         switch(shsl_type(col)) {
             case SHSL_NIL:
                 return shsl_mkint(0);
             case SHSL_STR:
-                return shsl_mkint(strlen(col.ptr->str));
+                return shsl_mkint(col.ptr->str.size);
             case SHSL_VEC:
                 return shsl_mkint(shsl_vec_length(col));
             case SHSL_MAP:
@@ -4900,7 +4946,7 @@ shsl_defun(shsl_builtin_exit, "exit", args, env, {
 shsl_defun(shsl_builtin_load, "load", args, env, {
         shsl_fn_assert_argslen(==1);
         shsl_fn_assert_argtype(0, SHSL_STR);
-        const char* filepath = shsl_fn_arg(0).ptr->str;
+        const char* filepath = shsl_fn_arg(0).ptr->str.buf;
 
         return shsl_eval_file(filepath, env);
     })
@@ -4919,7 +4965,7 @@ shsl_defun(shsl_builtin_gensym, "gensym", args, env, {
                      "the first argument to be of type string");
             // shsl_cat_strs heap allocates, remember this fact
             // for when we get to the teardown of this functions
-            base = shsl_cat_strs("gensym-", gsname.ptr->str, "-");
+            base = shsl_cat_strs("gensym-", gsname.ptr->str.buf, "-");
         }
         else
             return shsl_mkerr
@@ -4974,7 +5020,7 @@ shsl_defun(shsl_builtin_log, "log", args, env, {
         shsl_fn_assert_argtype(0, SHSL_INT);
         shsl_fn_assert_argtype(1, SHSL_STR);
         int log_level = shsl_int(shsl_fn_arg(0));
-        const char* what = shsl_fn_arg(1).ptr->str;
+        const char* what = shsl_fn_arg(1).ptr->str.buf;
         
         FILE* s = log_level==SHSL_LOG_LEVEL_INFO?stdout:stderr;
         shsl_log(s, log_level, what);
@@ -5539,23 +5585,27 @@ void shsl_sb_push_obj(shsl_string_builder* sb, shsl_ref obj, bool pretty) {
             if(!pretty) {
                 // dump to be read by reader
                 // handle all escapes and display them as printable ascii
+                const char* c = obj.ptr->str.buf;
+                const size_t s = obj.ptr->str.size;
                 shsl_sb_push(sb, '"');
-                for(const char* c = obj.ptr->str; *c; c++) {
-                    if(is_escape_char(*c))
-                        shsl_sb_push_nullt_str(sb, to_string_representation(*c));
+                for(size_t i = 0; i<s; ++i) {
+                    if(is_escape_char(c[i]))
+                        shsl_sb_push_nullt_str(sb, to_string_representation(c[i]));
                     else
-                        shsl_sb_push(sb, *c);
+                        shsl_sb_push(sb, c[i]);
                 }
                 shsl_sb_push(sb, '"');
             }
             else {
                 // I'm a pretty princess
                 // and displaying escape sequences is not pretty
-                shsl_sb_push_nullt_str(sb, obj.ptr->str);
+                shsl_sb_push_sized_str(sb, obj.ptr->str.buf, obj.ptr->str.size);
             }
             break;
         case SHSL_SYM:
-            shsl_sb_push_nullt_str(sb, obj.ptr->sym.name.ptr->str);
+            shsl_sb_push_sized_str(sb,
+                                   obj.ptr->sym.name.ptr->str.buf,
+                                   obj.ptr->sym.name.ptr->str.size);
             break;
         case SHSL_NIL:
             shsl_sb_push_nullt_str(sb, "nil");

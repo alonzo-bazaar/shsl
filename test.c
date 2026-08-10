@@ -151,7 +151,7 @@ void test_error(void) {
 			    "test error generation");
     shsl_unmute_logging();
 
-    assert(streq(s.ptr->err.msg.ptr->str, "test error generation"));
+    assert(streq(s.ptr->err.msg.ptr->str.buf, "test error generation"));
     shsl_free(s);
 }
 
