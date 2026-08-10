@@ -1231,7 +1231,9 @@ bool shsl_is_err(const shsl_ref ref) {
     return shsl_type(ref) == SHSL_ERR;
 }
 bool shsl_is_falsey(const shsl_ref ref) {
-    return (shsl_is_nil(ref) || shsl_is_err(ref));
+    return (shsl_is_nil(ref)
+            || shsl_is_err(ref)
+            || (shsl_is_bool(ref) && !ref.ptr->b));
 }
 bool shsl_is_truthy(const shsl_ref ref) {
     return !shsl_is_falsey(ref);
@@ -4345,7 +4347,7 @@ shsl_defun(shsl_builtin_div, "/", args, env, {
         return shsl_mkreal(a/b);
     })
 
-#define shsl_bool_to_obj(...) ((__VA_ARGS__)?shsl_mksym("t"):shsl_ref_to_nil())
+#define shsl_bool_to_obj(...) ((__VA_ARGS__)?shsl_ref_to_true():shsl_ref_to_false())
 shsl_defun(shsl_builtin_gt, ">", args, env, {
         (void)env;
         shsl_fn_assert_argslen(== 2);
@@ -4555,7 +4557,7 @@ shsl_defun(shsl_builtin_str, "str", args, env, {
 
 // (substr "string" start) = substring from that point to the end of the string
 // (substr "string" start end) = substring from a to b (b excluded, of course)
-shsl_defun(shsl_builtin_str_at, "str-at", args, env, {
+shsl_defun(shsl_builtin_strget, "str-get", args, env, {
         (void)env;
         shsl_fn_assert_argslen(== 2);
         shsl_fn_assert_argtype(0, SHSL_STR);
@@ -4565,7 +4567,7 @@ shsl_defun(shsl_builtin_str_at, "str-at", args, env, {
             return shsl_mkerr
                 (shsl_kwmap_fromelts(":index", shsl_fn_arg(1),
                                      ":indexed-string", shsl_fn_arg(0)),
-                 "str-at: cannot index into string using negative index");
+                 "str-get: cannot index into string using negative index");
 
         size_t i = si;
         if (i >= shsl_fn_arg(0).ptr->str.size)
@@ -4576,7 +4578,7 @@ shsl_defun(shsl_builtin_str_at, "str-at", args, env, {
                                      shsl_fn_arg(0),
                                      ":string-length",
                                      shsl_mkint(shsl_fn_arg(0).ptr->str.size)),
-                 "str-at: index out of bounds for string length");
+                 "str-get: index out of bounds for string length");
 
         return shsl_mkchar(shsl_fn_arg(0).ptr->str.buf[i]);
     })
@@ -5151,6 +5153,8 @@ shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
     // string operations(?)
     shsl_env_def(env, shsl_mksym("str"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_str));
+    shsl_env_def(env, shsl_mksym("str-get"),
+                 shsl_mkbuiltin_fn(env, shsl_builtin_strget));
     shsl_env_def(env, shsl_mksym("str-sub"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_substr));
     shsl_env_def(env, shsl_mksym("str-cat"),
@@ -5386,9 +5390,7 @@ shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
     // here we define a bunch of lil useful functions
     // indexing into from collections
     shsl_eval_str
-        ("(defn str-get [s i] (str-sub s i (+ i 1)))"
-
-         "(defn get [a b]"
+        ("(defn get [a b]"
          "  (cond ((str?  a) (str-get a b))"
          "        ((vec?  a) (vec-get a b))"
          "        ((map?  a) (map-get a b))"
