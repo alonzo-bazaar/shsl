@@ -2947,10 +2947,10 @@ shsl_expr* shsl_form_to_expr(shsl_ref form, shsl_ref env) {
                              });
                 }
                 // same reasoning as above
-                else if((strcmp(s, "set") == 0) || (strcmp(s, "def") == 0)) {
-                    bool are_we_set = (strcmp(s, "set") == 0);
+                else if((strcmp(s, "set!") == 0) || (strcmp(s, "def") == 0)) {
+                    bool are_we_set = (strcmp(s, "set!") == 0);
                     // TODO
-                    // we currently only support (set/def <name> <val>)
+                    // we currently only support (set!/def <name> <val>)
                     // I'd like set to be destructuring
                     if(form_length != 3)
                         return shsl_expr_error
@@ -5096,7 +5096,7 @@ shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
          "  (list 'not expr))"
 
          "(defn set-code [a b]"
-         "  (list 'set a b))"
+         "  (list 'set! a b))"
 
          "(defn def-code [a b]"
          "  (list 'def a b))"
@@ -5192,14 +5192,14 @@ shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
          "  (let [i 0"
          "        l (str-len haystack)]"
          "    (while (and (!= i l) (!= (str-get haystack i) needle))"
-         "      (set i (+ i 1)))"
+         "      (set! i (+ i 1)))"
          "    (if (!= i l) i nil)))"
                   
          "(defn vec-find [haystack needle]"
          "  (let [i 0"
          "        l (vec-len haystack)]"
          "    (while (and (!= i l) (!= (vec-get haystack i) needle))"
-         "      (set i (+ i 1)))"
+         "      (set! i (+ i 1)))"
          "    (if (!= i l) i nil)))"
 
          "(defn find [haystack needle]"
@@ -5214,7 +5214,7 @@ shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
          "  (let [i start-ind"
          "        l (len s)]"
          "    (while (and (< i l) (not (test (get s i) target)))"
-         "      (set i (+ i 1)))"
+         "      (set! i (+ i 1)))"
          "    (and (< i l) i)))",
          env);
 
@@ -5260,7 +5260,7 @@ shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
          "         slice (next-slice-from 0)]"
          "    (while (and (:start slice) (:end slice))"
          "      (vec-push! acc (sub s (:start slice) (:end slice)))"
-         "      (set slice (next-slice-from (:end slice))))"
+         "      (set! slice (next-slice-from (:end slice))))"
          "    acc))"
 
          "(defn join-with [sep ss]"
@@ -5289,7 +5289,7 @@ shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
          "    (let [acc [] i a]"
          "      (while (< i b)"
          "        (vec-push! acc (get v i))"
-         "        (set i (+ i 1)))"
+         "        (set! i (+ i 1)))"
          "      acc)))"
 
          "(defn sub [s a b]"
@@ -5304,8 +5304,8 @@ shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
         ("(defn lst-len [a]"
          "  (let [l 0]"
          "    (while (cons? a)"
-         "      (set a (cdr a))"
-         "      (set l (+ 1 l)))"
+         "      (set! a (cdr a))"
+         "      (set! l (+ 1 l)))"
          "    l))"
 
          "(defn len [a]"

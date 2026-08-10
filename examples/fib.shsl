@@ -1,5 +1,6 @@
+#!../shsl
 ;; -*- mode:clojure -*-
-;; vi: set ft=clojure;
+;; vi: set ft=clojure:
 
 (def fib-naive
   (fn [a]
@@ -11,7 +12,7 @@
 (let [i 0]
   (while (< i 10)
     (println "(fib" i ") =" (fib-naive i))
-    (set i (+ i 1))))
+    (set! i (+ i 1))))
 
 (def fib-fast-as-fuck
   (fn [n]
@@ -19,13 +20,14 @@
           b 1
           i 0]
       (while (< i n)
-        (set i (+ i 1))
+        (set! i (+ i 1))
         (def c (+ a b))
-        (set a b)
-        (set b c))
+        (set! a b)
+        (set! b c))
       a)))
 
 (let [i 0]
   (while (< i 30)
     (println "(fib" i ") =" (fib-fast-as-fuck i))
-    (set i (+ i 1))))
+    (set! i (+ i 1))))
+

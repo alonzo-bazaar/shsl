@@ -20,7 +20,7 @@
 (defn exec-or-die [name cmd]
   (when log-step? (println (str "now at step: " name "...")))
   (when log-cmd? (println (str "running command:\n" cmd)))
-  (set status (exec-vec cmd))
+  (set! status (exec-vec cmd))
   (when log-step? (println (str "finished step: " name "\n")))
   (or status (die "step exited with failure, exiting build script")))
 

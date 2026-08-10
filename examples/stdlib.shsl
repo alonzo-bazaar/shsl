@@ -53,7 +53,7 @@
   (list 'not expr))
 
 (defn set-code [expr]
-  (list 'set expr))
+  (list 'set! expr))
 
 (defn let-code [binds & body]
   (cons 'let (cons binds (vec->list body))))
@@ -106,14 +106,14 @@
   (let [i 0
         l (str-len haystack)]
     (while (and (!= i l) (!= (str-at haystack i) needle))
-      (set i (+ i 1)))
+      (set! i (+ i 1)))
     (if (!= i l) i nil)))
 
 (defn vec-find [haystack needle]
   (let [i 0
         l (vec-len haystack)]
     (while (and (!= i l) (!= (vec-get haystack i) needle))
-      (set i (+ i 1)))
+      (set! i (+ i 1)))
     (if (!= i l) i nil)))
 
 (defn find [haystack needle]

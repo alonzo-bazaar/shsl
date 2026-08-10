@@ -1,4 +1,7 @@
+#!../shsl
 ;; -*- mode:clojure -*-
-;; vi: set ft=clojure;
-(let [i 0] (while (< i 10) (print i (* i i)) (set i (+ i 1))))
-(println "")
+;; vi: set ft=clojure:
+(let [i 0]
+  (while (< i 10)
+    (println i (* i i))
+    (set! i (+ i 1))))

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 ;; -*- mode:clojure -*-
-;; vi: set ft=clojure;
+;; vi: set ft=clojure:
 ;; the contents of the shebang don't matter unless you call this file like ./shebang.shsl
 ;; I'm using /usr/bin/env bash for shits and giggles
 ;; all that matters is that we skip it
