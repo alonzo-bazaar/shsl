@@ -1,10 +1,10 @@
 * SHSL
 Single Header Scripting (language|library|layer|lisp)
 
-SHSL is a small scripting language with a [[https://clojure.org/][clojure]]-like syntax meant to be as easy as possible to add to an existing C or C++ project.
+shsl is a small scripting language with a [[https://clojure.org/][clojure]]-like syntax meant to be as easy as possible to add to an existing C or C++ project.
 
 #+begin_quote
-*NOTE:* SHSL is still at a rather early stage so many aspects of the language and library are likely to change with future versions or releases, you can depend on a given version without much problem since it's meant to be vendored with your project, but keep that in mind when upgrading your SHSL.
+*NOTE:* shsl is still at a rather early stage so many aspects of the language and library are likely to change with future versions or releases, you can depend on a given version without much problem since it's meant to be vendored with your project, but keep that in mind when upgrading your shsl.
 #+end_quote
 
 * Raison d'etre
@@ -16,17 +16,17 @@ Consider for instance the problem of adding a build script/build step to your C/
 - A python script :: but that incurs in this huge build time dependency for the project that is "you must have python installed", and may end up requiring a particular range of python versions, adding further complications.
 - Cmake :: which is a more common choice for larger project but can be a huge upfront dependency for smaller projects, plus it introduces a lot of moving parts that can often get in the way, a whole new set of concepts you need to learn, and is often just plain overkill.
 
-SHSL aims to serve the niche of C/C++ projects that are large enough to need a script for something, but small enough that other cross platform solutions for scripting would be an overkill dependency.
+shsl aims to serve the niche of C/C++ projects that are large enough to need a script for something, but small enough that other cross platform solutions for scripting would be an overkill dependency.
 
-Being a singe C header SHSL is quite easy to vendor with your project, to run any script in your project you just need to compile one C file and there's your runner, and being a header file you can also include it in your C files and run the scripts from within the C code!
+Being a singe C header shsl is quite easy to vendor with your project, to run any script in your project you just need to compile one C file and there's your runner, and being a header file you can also include it in your C files and run the scripts from within the C code!
 
 * Compiling
 #+begin_quote
-*NOTE:* SHSL Has been tested with ~clang~ and ~gcc~ on Linux, the code is meant to be compiler and OS agnostic but I haven't tested it on other compilers or operating systems to verify this.
+*NOTE:* shsl Has been tested with ~clang~ and ~gcc~ on Linux, the code is meant to be compiler and OS agnostic but I haven't tested it on other compilers or operating systems to verify this.
 #+end_quote
 
 ** As a Library
-SHSL is an stb sytle library, this means function declarations and definitions live in the same file, with function definitions placed behind a macro so you can decide where to define them, and only define them there, thus avoiding odr violations, while still not having the entire library be only one file.
+shsl is an stb sytle library, this means function declarations and definitions live in the same file, with function definitions placed behind a macro so you can decide where to define them, and only define them there, thus avoiding odr violations, while still not having the entire library be only one file.
 
 To compile shsl as a dynamic library you can do
 #+begin_src bash
@@ -37,17 +37,18 @@ To compile shsl as a dynamic library you can do
 #+end_quote
 
 ** As an Executable
-If you have downloaded this entire repository you can just compile SHSL with
+
+If you have downloaded this entire repository you can just compile shsl with
 #+begin_src bash
   make shsl
 #+end_src
 Which will create a ~shsl~ executable in the project root.
 
-Being only one ~.h~ and once ~.c~ file, SHSL can also be compiled as
+Being only one ~.h~ and once ~.c~ file, shsl can also be compiled as
 #+begin_src bash
   cc -o shsl shsl.c
 #+end_src
-If you have more complex project structure in which you want to include SHSL, the whole library is just an ~.h~ file, you can add it to your project as you would any other ~.h~ file, that's the beauty of it.
+If you have more complex project structure in which you want to include shsl, the whole library is just an ~.h~ file, you can add it to your project as you would any other ~.h~ file, that's the beauty of it.
 
 ** Compiling/running the tests
 To compile and run the C tests you run
@@ -61,9 +62,12 @@ There are also some tests written in bash which you can run by calling
 #+end_src
 
 * Usage
-Assuming you're in the project root and that the SHSL executable is called ~./shsl~
+#+begin_quote
+*NOTE* the following usage examples assume shsl is being invoked from a posix or posix adjacent shell
+if you're on windows replace all instances of ~./shsl~ with ~shsl.exe~ or ~.\shsl.exe~
+#+end_quote
 
-You can start an SHSL repl by calling
+You can start an shsl repl by calling
 #+begin_src bash
 ./shsl
 #+end_src
@@ -71,9 +75,10 @@ or, if you wanna be more explicit
 #+begin_src bash
 ./shsl -r
 #+end_src
-this will give you a ~shsl>~ prompt in which you can type SHSL code, hit enter, and it will immediately run it and print the result for you.
+this will give you a ~shsl>~ prompt in which you can type shsl code, hit enter, and it will immediately run it and print the result for you.
 #+begin_quote
-NOTE: SHSL doesn't have a multiline repl yet, it will evaluate every line you pass to the repl as a separate expression, if you want to pass it longer expressions you'll either have to flatten them to a single line or run then from a file.
+NOTE: shsl doesn't have a multiline repl yet, it will evaluate every line you pass to the repl as a separate expression, if you want to pass it longer expressions you'll either have to flatten them to a single line or run then from a file.  
+Shsl also doesn't have that good a repl experience in general, if you need to run it from a repl consider using ~rlwrap~ or a similar program for the time being.
 #+end_quote
 
 You can run an shsl script by calling
@@ -84,36 +89,36 @@ or, if you wanna be more explicit
 #+begin_src bash
 ./shsl -f <file>
 #+end_src
-Although please note the first version will pass any additional arguments to ~<file>~ as an argv, whereas the second version will interpret any additional arguments as more SHSL command line arguments.
+Although please note the first version will pass any additional arguments to ~<file>~ as an ~argv~, whereas the second version will interpret any additional arguments as more shsl command line arguments, and execute ~<file>~ with an empty ~argv~.
 
-SHSL supports shebangs in script files so you can also call a script by having the script begin with ~#!/path/to/shsl/executable~ (or ~#!/usr/bin/env name_of_shsl_executable~ if SHSL is in your ~$PATH~) and invoking the script as
+Shsl supports shebangs in script files so you can also call a script by having the script begin with ~#!/path/to/shsl/executable~ (or ~#!/usr/bin/env name_of_shsl_executable~ if shsl is in your ~$PATH~) and invoking the script as
 #+begin_src bash
   ./path/to/script
 #+end_src
-(and remember to ~chmod +x ./path/to/script~ first)
+(remember to ~chmod +x ./path/to/script~ first)
 
-You can also give SHSL a string of SHSL code to run from the command line itself by calling
+You can also give shsl a string of shsl code to run from the command line itself by calling
 #+begin_src bash
   ./shsl -e <string of shsl code>
 #+end_src
-this can be useful if you want to run a snippet of SHSL code in another script (such as a bash script), or for testing purposes.
+this can be useful if you want to run a snippet of shsl code in another script (such as a bash script), or for testing purposes.
 
 Or to have shsl print you a help message you can run
 #+begin_src bash
   ./shsl -h
 #+end_src
 
-When given several flags SHSL will go through them in order and run all the flags one after the other, for instance
+When given several flags shsl will go through them in order and run all the flags one after the other, for instance
 #+begin_src bash
   ./shsl -e "(println \"hello\")" -e "(println \"world\")" -r
 #+end_src
-will print ~"hello"~ first, then ~"world"~, then start a repl.
+will print a line with ~"hello"~ first, then a line with ~"world"~, then start a repl.
 
 * Language
-As previously hinted SHSL syntax +steals+ takes a fair bit if inspiration from clojure, this is because I like clojure's syntax and I like getting syntax highlighting and editor support for free by just naming the file ~script.clj~ instead of ~script.shsl~.
+As previously hinted shsl syntax +steals+ takes a fair bit if inspiration from clojure, this is because I like clojure's syntax and I like getting syntax highlighting and editor support for free by just naming an shsl file ~file.clj~, or by using vim/emacs magic comments, that said it should be noted that shsl and clojure have very different scopes and target applications, and are as a result very different as languages, both practically and philosophically.
 
-The following is a [[https://learnxinyminutes.com/][learnxinyminutes]] style rundown of SHSL's various syntax and features, the file is also available at ~examples/learn_shsl.shsl~ 
-#+begin_src clojurescript
+The following is a [[https://learnxinyminutes.com/][learnxinyminutes]] style rundown of shsl's various syntax and features, the file is also available at ~examples/learn_shsl.shsl~ 
+#+begin_src clojure
   #!/usr/bin/env cljs
   ;; the contents of the shebang don't matter, it's meant to be read by the os
   ;; not by shsl, shsl just has to recognize it and skip ignore it
@@ -173,10 +178,14 @@ The following is a [[https://learnxinyminutes.com/][learnxinyminutes]] style run
 
 * Repo tour
 - ~shsl.h~ :: the master file, the entire langauge is defined in here
-- ~shsl.c~ :: thin main function
-- ~make.shsl~ :: build script
-- ~back~ :: backup build script (the main script depends on ~shsl~ so if shsl is broken so is the build script) 
-- ~examples/~ :: various examples of shsl scripts, all the scripts in this directory can be run with the current shsl version
+- ~shsl_exec.h~ :: header file contianing shsl'si external command running library, morally part of ~shsl.h~, but made more sense to put in a separate file
+- ~shsl.c~ :: c file containing a main function because I don't want to put an ~int main()~ in a header file, it kinda stops being a header file once you do that
+- ~single-file/shsl.h~ :: "amlgam" header file, contains ~shsl.h~ and ~shsl_exec.h~ in a single, more convenient to use, file
+- ~single-file/shsl.c~ :: "amlgam" c file, contains ~shsl.h~, ~shsl_exec.h~, and ~shsl.c~, same reasoning as above
+- ~single-file/gen~ :: posix shell script to create ~single-file/shsl.h~ and ~single-file/shsl.c~
+- ~make.shsl~ :: build script for shsl, written in shsl
+- ~back~ :: backup build script for shsl written in posix shell (the main script depends on ~shsl~ meaning if shsl is broken so is the build script) 
+- ~examples/~ :: directory of various examples of shsl scripts, all the scripts in this directory can be run with the current version of shsl
 - ~ramblings/~ :: various notes to self i felt the need to version
 - ~docs/~ :: (currently absent) documentation
 - ~aids/~ :: programs used to aid in either the testing or deveoping of shsl, not part of shsl the program, but part of shsl the infrastructure around the program
@@ -194,9 +203,9 @@ The following is a [[https://learnxinyminutes.com/][learnxinyminutes]] style run
   - [x] ~exec~ function for posix and win32
   - [-] ~exec-parallel~ functions for posix and win32
   - [-] ~exec-pipeline~ functions for posix and win32
-  - [-] ~exec-into-str~ functions for posix and win32
-- [ ] an ~execasync~ function for scripting
-- [ ] a filesystem library for scripting
+  - [+] ~exec-into-str~ functions for posix and win32
+  - [ ] an ~execasync~ function for scripting
+- [-] a filesystem library for scripting
 - [ ] proper hash maps instead of using a sequential vector of key/value pairs
 - [ ] make closer to clojure for ease of learning
 - [ ] support for more memory management schemas

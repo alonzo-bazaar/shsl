@@ -1,0 +1,269 @@
+here be ramblings about the process api for shsl
+
+I could make a generic process handle that's just a map containing some metatadata and a void pionter to a c struct
+could be a void pointer and maybe a pid?
+idk
+
+* designing process
+** operations I wanna be able to do on processes
+- fire and forget (disown?)
+- fire and wait (disown?)
+- fire multiple processes then wait for all of them at the end
+- fire a process and give it a
+  - string
+  - process-stdout or process-stderr or both
+  - file
+  to use as input
+- fire a process and give it a particular process stdin to redirect its output to (possibly handled better by just using the usecase above to implement this one)
+- fire a process and collect its standard output and standard error /somewhere/
+
+** what api could implement these operations?
+I could have a structured thing like
+constructing properly piped process trees and just yeeting those
+like
+#+begin_src clojure
+  (let [p (proc ["ls" "-l"]
+                :stdout-to (proc ["grep" "^[A-Z]+pdf$"])
+                :stderr-to nil)] ;; <- nil repalced with /dev/null or whatever the windows equivalent is based on os
+    (launch p))
+  ;; perhaps launch returns a map like
+  ;; {:success...
+  ;;  :stdout ...
+  ;;  :stderr ...
+  ;;  :exit-code ...
+  ;; }
+  ;; where stdout and stderr might be nil if success is not truthy
+
+  ;; or launch could accept some kwargs like
+  (launch p :collect-stdout t
+            :collect-stderr t)
+  ;; which will poopulate a return map with stdout and stderr and shit 
+
+  ;; pipelines could be done as
+  (pipeline
+   ["ls" "-l"]
+   ["grep" "^[A-Z]+pdf$"])
+
+  ;; I suppose a pipeline form could return something akin to PIPESTATUS
+  ;; which in this case would be a vector of maps in the form returned by
+  ;; launch
+
+  ;; should pipeline accept some kwargs before its & rest?
+  ;; perhaps pertaining to
+  ;; do I collect the stdout's of these processes as well?
+  ;; and shit
+
+  ;; how do I make process output collection not blocking?
+  ;; or should I give it a name that's more explicitly blocking?
+
+  ;; I might call a more fire and forget/wait api
+  ;; fire
+  ;; forget
+  ;; wait
+
+  ;; but when launching a process to collect its stdout/stderr and shit I kinda need to block, 'cause I want to read all of its output (up until closing
+  ;; its stdout (ie exiting))
+  ;; I /could/ try and keep this in the current state of the exec api (so keep exec-strs) since it kinda does the shit you'd expect it to do in this case
+  ;; launch, redirect, read, block
+  ;; I kinda wanna call it `reap` or some shit, 'cause it sounds cool
+
+  ;; going back to the above launch thing
+  ;; ie, this
+  (proc ["ls" "-l"]
+        :stdout-to (proc ["grep" "^[A-Z]+pdf$"])
+        :stderr-to nil)
+
+  ;; it seems redirecting output makes for a more natural "pipeline literal" representation
+  ;; so I'm afraid having :stdout-to instead of :stdin-from makes more sense
+  ;; 
+  ;; I'd have to do some python-y bullshit with having half a lang just in the kwargs 'cause, for instance
+  ;; - can't specify stdout-and-err-to but also have stdout-to and stderr-to
+  ;;   if you have stdout-and-err-to that's its own thing and doesn't allow for 
+  ;;   stdout-to or stderr-to to be specified in the same launch spec, idfk
+  ;;   should I add a `tee' thing to the process launch spec? that'd probably be useful
+
+  ;; like for instance
+  (proc ["ls" "-l"]
+        :stdout-tee-to ["ls.log" (proc ["grep" "^[A-Z]+pdf$"])]
+        :stderr-to nil)
+
+  ;; or I could just
+  (proc ["ls" "-l"]
+        :stdout-to ["tee" "ls.log" :stdout-to (proc ["grep" "^[A-Z]+pdf$"])]
+        :stderr-to nil)
+
+  ;; but you can't guarantee that tee exists on your system, can't you
+  ;; so I'd probably have to implement :stdout-tee-to as well... smh my h
+
+  ;; I could have pipeline accept a kind of its own sort of syntax for pipelines, having like
+  (pipeline
+   ["ls" "-l"]
+   ["grep" "^[A-Z]+pdf$"])
+
+  ;; possibly interspersed with redirection symbols, such as
+  (pipeline
+   ["ls" "-l"]
+   :join-out-err
+   ["grep" "^[A-Z]+pdf$"])
+
+  (pipeline
+   ["ls" "-l"]
+   :out-to-err
+   ["grep" "^[A-Z]+pdf$"])
+
+  (pipeline
+   ["ls" "-l"]
+   :err-to-out
+   ["grep" "^[A-Z]+pdf$"])
+
+  ;; then pipeline just expands to a `proc` call so I can `launch` it
+  ;; perhaps I should make pipeline expand into something else, I'd like it if launching a pipeline returned a PIPESTATUS like result
+
+  ;; perhaps I could have
+  ;; `proc` specifies a process to be launched, with a command and perhaps redirects shit to other processes
+  ;;        
+
+  ;; async process launch:
+  ;; `fire`   : runs the process, doesn't collect shit tho
+  ;; `wait`   : blocks waiting on a `fire`d process, only returns an exit status
+  ;; `forget` : disowns a `fire`d process
+
+  ;; sync process launch:
+  ;; `reap`   : launches a `proc` and blocks waiting on it, plus collects everything there is to collect about the process
+
+  ;; this api would let me implement `exec-vec` and `exec-vec-strs` as
+  (defn exec-vec [cmd]
+    (wait (fire (proc cmd))))
+  (defn exec-vec-strs [cmd]
+    (reap (proc cmd)))
+
+  ;; I should probably comme up with a better name for `reap` to better express it does expect a non launched process
+  ;; launch reap?
+  ;; launch and collect?
+  ;; reaping launch?
+  ;; I could make launch be blocking or not depending on the args passed to it but it seems like a jolly old fuckawful idea
+
+  ;; I could make the process spec have like :stdout-to 'collect which would make launching the process blocking and make launch return {:stdout ...}
+  ;; but that also sounds fucking awful
+  ;; I'm gonna stick with `reap` for the time being and just, idfk, come up with a better name later
+#+end_src
+  
+** how should I model processes to make it possible to have this api/these operations?
+the main problem here is likely gonna be 
+
+I need a process handle, this structure will probably be specified on the c side and have different implmentations depending on wether win32 or posix
+the shsl side will hold a void pointer to a heap allocated c side process handle
+
+this handle will most likely be
+- posix side :: a ~pid_t~ 
+- win32 side :: a ~PROCESS_INFO~ 
+
+this might be implemented without needing pointer types if I just replicate the c structs on the lisp side 
+/but/ would probably be a huge pain in the ass to replicate the behemoth that is ~PROCESS_INFO~ (and especially ~HANDLE~) on the lisp side, so it's probalby for the better that I wrangle em through c void pointers to heap allocated whatevers
+
+although that begs a not so insignificant question, how do I manage freeing them?
+I'm afraid I gotta have a ~free-handle~ function somewhere in the lisp side that does some preliminary freeing of shit taken by the handles
+
+(before ~shsl_free~ frees the malloc'd pointer, which I believe doesn't need type info for c to know how to free it)
+
+I also need a running-process handle of sorts, to wait on, this could be the same as a process handle
+
+I also need some way to specify a process launch with all the pipes and shit
+which could be (modest proposal below)
+#+begin_src clojure
+  ;; static  process spec
+  {
+   :command ["ls" "-l"]
+   :stdout-to ;; [(live process handle) | string (file) | nil (discarded, a la /dev/null)]
+              ;; it could also be an array containing one or more, string and/or process handles
+              ;; in which case the output will be tee'd amoung every element in the array
+              ;; it's illegal for an :stdout-to spec to be an array and contain a nil (or other /dev/null equivalent)
+
+   :stderr-to ;; same shit as stdout
+  }
+
+  ;; live process handle
+  ;; (a pointer to shit handled on the c side)
+#+end_src
+
+Having the static spec hold a handle to a live spec would mean that
+given how when populating the static spec you need to have all the fields ready
+you gotta launch the processes before you can bind em to be the output and shit of the static process spec
+is this a good idea?
+
+hmm, ideally I'd specify all pipes&Co. before launching, but if I have a fork exec kinda thing I need to spawn them in a given order to avoid some input being lost... I think
+do I need to spawn the senders or the receivers first?
+I'm gonna assume the senders, that's what I did in the exec library... which means the spec above won't work.
+
+it's a bit less flexible but  I could have the static process launch spec hold /static/ receiver specs
+I don't think em holding a handle to a live child  is anywhere in my usecases anyhow
+
+so...
+#+begin_src clojure
+  ;; static  process spec
+  {
+   :command ["ls" "-l"]
+   :stdout-to ;; [(another static process handle) | string (file) | nil (discarded, a la /dev/null) | stdout | stderr | t (interpreted as stdout)]
+              ;; it could also be an array containing one or more, string and/or process handles
+              ;; in which case the output will be tee'd amoung every element in the array
+              ;; it's illegal for an :stdout-to spec to be an array and contain a nil (or other /dev/null equivalent)
+
+   :stderr-to ;; same shit as stdout, but t is interpreted as stderr
+  }
+
+  ;; live process handle
+  ;; (a pointer to shit handled on the c side)
+#+end_src
+this might work, idk now much the t thing could fuck some up, I don't think it would fuck a /lot/ up, but it seems kinda esoteric and implicity
+perhaps I'll remove it in a later design 
+hmmm
+
+* some extra data types (I wanna add void pointers)
+I wanna add these types to shsl's basic type roster 
+- boolean (might make a global true and false)                 -> with clojure syntax
+- character (so I don't have to handle strings the python way) -> with clojure syntax
+and
+- void pointer (to ease in writing functions in c and reaping their values from shsl code) -> idfk
+
+I could have two global void pointers in the initial env pointing to the two ~FILE*~ s ~stdout~ and ~stderr~
+so I could have the redirect functions have
+~:stdout-to stdout~ 
+
+Booleans and characters mostly for better conformity with clojure (and because cl style nil/t for booleans miiight be a bit of a shit idea I'm afraid) 
+
+I'm still keeping nil (ie the empty list) as faley tho, that shit's stupidly useful
+
+* Roadmap for process&Co. ig
+- add new data types
+- (test new data types)
+- screw around in c tryna make something akin to the fire-forget-wait-reap-&Co. library
+  will probalby statically allocate everything for it tho lol
+  will also have to research both win32 and posix a /lot/ to figure out how to properly map that api to both win32 and posix
+  - fire and reap both take process /specs/
+  - wait and forget both take /running/ processes
+- and should probably test that library a bit that as well before adding it to ~shsl_exec~
+
+** character literals
+https://clojure.org/guides/weird_characters
+There are also a small number of special characters to name special ASCII characters
+- \newline
+- \space
+- \tab
+- \formfeed
+- \backspace
+- \return.
+The \ can also be followed by a Unicode literal of the form \uNNNN. For example, \u03A9 is the literal for Ω.
+
+
+** notes for the posix/win32 side
+for win32 side the forget is probably just gonna be closing the file handles
+and waiting is just gonna be wait single object, then close the file handles
+I should probably see what's the correct way to signal that once waited on a process is /kaput/
+
+for posix waiting on same shit, just call ~waitpid~
+but... how do I forget?
+if I recall correctly from stackoverflow the correct way to "disown" a child on posix is to make the child ignore the sigchild signal or something like that, which is what the parent will send to the child once it either exits or starts waiting on the child... I guess(?)
+- see/ask how bash does it
+- see/ask on the ysap server I suppose
+
+
