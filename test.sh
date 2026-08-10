@@ -134,19 +134,19 @@ muted() {
 assert_shsl_equal 'nil' "(if $(muted "(err \"test error\")") 'a)"
 
 # builtin funs
-assert_shsl_equal 'nil' "(> 10 20)"
-assert_shsl_equal 't' "(< 10 20)"
-assert_shsl_equal 'nil' "(>= 10 20)"
-assert_shsl_equal 't' "(<= 10 20)"
+assert_shsl_equal 'false' "(> 10 20)"
+assert_shsl_equal 'true' "(< 10 20)"
+assert_shsl_equal 'false' "(>= 10 20)"
+assert_shsl_equal 'true' "(<= 10 20)"
 
-assert_shsl_equal 't' "(nil? nil)"
-assert_shsl_equal 't' "(nil? '())"
-assert_shsl_equal 'nil' "(nil? t)"
+assert_shsl_equal 'true' "(nil? nil)"
+assert_shsl_equal 'true' "(nil? '())"
+assert_shsl_equal 'false' "(nil? t)"
 
-assert_shsl_equal 't' "(sym? t)"
-assert_shsl_equal 't' "(sym? 'hello)"
-assert_shsl_equal 'nil' "(sym? 'nil)"
-assert_shsl_equal 'nil' "(sym? 10)"
+assert_shsl_equal 'true' "(sym? t)"
+assert_shsl_equal 'true' "(sym? 'hello)"
+assert_shsl_equal 'false' "(sym? 'nil)"
+assert_shsl_equal 'false' "(sym? 10)"
 
 assert_shsl_equal '(a b)' "(cons 'a (cons 'b nil))"
 

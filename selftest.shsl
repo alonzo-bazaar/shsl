@@ -95,14 +95,14 @@
        "do blocks should return the last thing therein")
 
 ;; basic predicates
-(asseq t (nil? nil) "basic predicates")
-(asseq t (nil? '()) "basic predicates")
-(asseq nil (nil? t) "basic predicates")
+(asseq true (nil? nil) "basic predicates")
+(asseq true (nil? '()) "basic predicates")
+(asseq false (nil? t) "basic predicates")
 
-(asseq t (sym? t)      "basic predicates")
-(asseq t (sym? 'hello) "basic predicates")
-(asseq nil (sym? 'nil) "basic predicates")
-(asseq nil (sym? 10)   "basic predicates")
+(asseq true (sym? t)      "basic predicates")
+(asseq true (sym? 'hello) "basic predicates")
+(asseq false (sym? 'nil) "basic predicates")
+(asseq false (sym? 10)   "basic predicates")
 
 ;; advanced lambda fuckery
 (asseq 10000

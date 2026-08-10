@@ -2220,7 +2220,7 @@ shsl_token parse_non_special_token(const char*c, size_t len) {
 	    .ref = shsl_ref_to_true(),
 	};
     if (len == 5 &&
-        c[0] == 'f' && c[1] == 'a' && c[2] == 'l' && c[3] == 's' && c[3] == 'e')
+        c[0] == 'f' && c[1] == 'a' && c[2] == 'l' && c[3] == 's' && c[4] == 'e')
 	return (shsl_token) {
 	    .type = SHSL_TOK_BOOL,
 	    .ref = shsl_ref_to_false(),
