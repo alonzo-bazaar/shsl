@@ -156,7 +156,8 @@ typedef enum SHSL_OBJ_TYPE {
     // atoms
     // nil first so an object initialized as {0} is nil
     SHSL_NIL = 0, SHSL_SYM, 
-    SHSL_INT, SHSL_REAL, SHSL_STR,
+    SHSL_CHAR, SHSL_BOOL, SHSL_INT, SHSL_REAL, SHSL_STR,
+    SHSL_VPTR,
 
     // collections
     SHSL_CONS, SHSL_VEC, SHSL_MAP,
@@ -264,7 +265,10 @@ bool shsl_is_macro(const shsl_ref ref);
 // on the heap makes it easier to automatically manage
 shsl_ref shsl_mkint(long l);
 shsl_ref shsl_mkreal(double d);
+shsl_ref shsl_mkchar(const char c);
 shsl_ref shsl_mkstr(const char* str);
+shsl_ref shsl_mkbool(const bool b);
+shsl_ref shsl_mkvptr(const void* vptr);
 shsl_ref shsl_mksym(const char* name);
 shsl_ref shsl_mkerr(shsl_ref data, const char* msg, ...);
 // shsl_vmkerr is like shsl_mkerr but accepts a "pre opened" va_list and it
@@ -1045,6 +1049,9 @@ typedef struct shsl_obj {
     union {
 	const long i;
 	const double r;
+        const char c;
+        const bool b;
+        const void* vptr;
 	char* str;
 
 	const shsl_sym sym;
@@ -1266,6 +1273,15 @@ bool shsl_is_macro(const shsl_ref ref) {
 shsl_ref shsl_mkint(long l) {
     return_mallocd_obj(.ref_count = 0, .type = SHSL_INT, .i = l);
 }
+shsl_ref shsl_mkchar(const char c) {
+    return_mallocd_obj(.ref_count = 0, .type = SHSL_CHAR, .c = c);
+}
+shsl_ref shsl_mkbool(const bool b) {
+    return_mallocd_obj(.ref_count = 0, .type = SHSL_BOOL, .b = b);
+}
+shsl_ref shsl_mkvptr(const void* vptr) {
+    return_mallocd_obj(.ref_count = 0, .type = SHSL_VPTR, .vptr = vptr);
+}
 shsl_ref shsl_mkreal(double d) {
     return_mallocd_obj(.ref_count = 0, .type = SHSL_REAL, .r = d);
 }
@@ -1431,6 +1447,9 @@ shsl_ref shsl_copy(shsl_ref ref) {
     switch(shsl_type(ref)) {
         case SHSL_NIL:    return shsl_ref_to_nil();
         case SHSL_SYM:    return shsl_mksym(ref.ptr->sym.name.ptr->str);
+        case SHSL_CHAR:   return shsl_mkchar(ref.ptr->c);
+        case SHSL_BOOL:   return shsl_mkbool(ref.ptr->b);
+        case SHSL_VPTR:   return shsl_mkvptr(ref.ptr->vptr);
         case SHSL_INT:    return shsl_mkint(ref.ptr->i);
         case SHSL_REAL:   return shsl_mkint(ref.ptr->r);
         case SHSL_STR:    return shsl_mkstr(ref.ptr->str);
@@ -1576,6 +1595,12 @@ bool shsl_eq(shsl_ref lhs_ref, shsl_ref rhs_ref) {
 
         case SHSL_INT:
             return lhs->i == rhs->i;
+        case SHSL_CHAR:
+            return lhs->c == rhs->c;
+        case SHSL_BOOL:
+            return lhs->b == rhs->b;
+        case SHSL_VPTR:
+            return lhs->vptr == rhs->vptr;
         case SHSL_REAL:
             return lhs->r == rhs->r;
         case SHSL_STR:
@@ -1615,6 +1640,9 @@ const char* shsl_stringify_type(SHSL_OBJ_TYPE type) {
     switch(type) {
         case SHSL_NIL:           return "shsl nil";
         case SHSL_SYM:           return "shsl symbol";
+        case SHSL_CHAR:          return "shsl character";
+        case SHSL_BOOL:          return "shsl boolean";
+        case SHSL_VPTR:          return "shsl void pointer";
         case SHSL_INT:           return "shsl integer";
         case SHSL_REAL:          return "shsl real";
         case SHSL_STR:           return "shsl string";
@@ -1996,27 +2024,6 @@ shsl_ref shsl_fn_env(shsl_ref ref) {
             assert(0 && "unreachable");
     }
 }
-/*
-void shsl_fn_env_mark_weak(shsl_ref ref) {
-    assert(shsl_is_fn(ref));
-    switch(ref.ptr->type) {
-        case SHSL_BUILTIN_FN:
-            shsl_ref_mark_weak(&(ref.ptr->builtin_fn.env));
-            break;
-        case SHSL_USER_FN:
-            shsl_ref_mark_weak(&(ref.ptr->user_fn.env));
-            break;
-        case SHSL_BUILTIN_MACRO:
-            shsl_ref_mark_weak(&(ref.ptr->builtin_macro.env));
-            break;
-        case SHSL_USER_MACRO:
-            shsl_ref_mark_weak(&(ref.ptr->user_macro.env));
-            break;
-        default:
-            assert(0 && "unreachable");
-    }
-}
-*/
 
 shsl_def_errtype_fn(int, int)
 shsl_def_errtype_fn(size_t, size_t)
@@ -2618,6 +2625,9 @@ shsl_expr* shsl_form_to_expr(shsl_ref form, shsl_ref env) {
         case SHSL_REAL:
         case SHSL_STR:
         case SHSL_NIL:
+        case SHSL_CHAR:
+        case SHSL_BOOL:
+        case SHSL_VPTR:
             return_mallocd_expr(.type = SHSL_EXPR_LITERAL,
                                 .literal = shsl_ref_add(form));
 
@@ -5359,6 +5369,17 @@ void shsl_sb_push_obj(shsl_string_builder* sb, shsl_ref obj, bool pretty) {
             break;
         case SHSL_REAL:
             written = sprintf(buf, "%f", obj.ptr->r);
+            shsl_sb_push_sized_str(sb, buf, written);
+            break;
+        case SHSL_CHAR:
+            written = sprintf(buf, "\\%c", (int)obj.ptr->c);
+            shsl_sb_push_sized_str(sb, buf, written);
+            break;
+        case SHSL_BOOL:
+            shsl_sb_push_nullt_str(sb, obj.ptr->b?"true":"false");
+            break;
+        case SHSL_VPTR:
+            written = sprintf(buf, "VOID_PTR_%p", obj.ptr->vptr);
             shsl_sb_push_sized_str(sb, buf, written);
             break;
         case SHSL_STR:

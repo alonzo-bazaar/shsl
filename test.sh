@@ -87,20 +87,20 @@ assert_shsl_equal '{}' "'{}" "empty quoted map"
 
 # def and set
 assert_shsl_equal '10' "(def a 10)"
-assert_shsl_equal '20' "(def a 10) (set a 20)"
-assert_shsl_equal '30' "(def a 10) (set a 20) (set a 30)"
+assert_shsl_equal '20' "(def a 10) (set! a 20)"
+assert_shsl_equal '30' "(def a 10) (set! a 20) (set! a 30)"
 
 assert_shsl_equal '10' "(def a 10)"
 assert_shsl_equal '20' "(def a 10) (def a 20)"
 assert_shsl_equal '30' "(def a 10) (def a 20) (def a 30)"
 
-assert_shsl_equal '10' "(set a 10)"
-assert_shsl_equal '20' "(set a 10) (set a 20)"
-assert_shsl_equal '30' "(set a 10) (set a 20) (set a 30)"
+assert_shsl_equal '10' "(set! a 10)"
+assert_shsl_equal '20' "(set! a 10) (set! a 20)"
+assert_shsl_equal '30' "(set! a 10) (set! a 20) (set! a 30)"
 
-assert_shsl_equal '10' "(set a 10)"
-assert_shsl_equal '20' "(set a 10) (def a 20)"
-assert_shsl_equal '30' "(set a 10) (def a 20) (def a 30)"
+assert_shsl_equal '10' "(set! a 10)"
+assert_shsl_equal '20' "(set! a 10) (def a 20)"
+assert_shsl_equal '30' "(set! a 10) (def a 20) (def a 30)"
 
 # do blocks
 # (newlines in bash are fucking weird bruh)
