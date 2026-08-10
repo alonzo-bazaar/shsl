@@ -245,6 +245,9 @@ bool shsl_is_nil(const shsl_ref ref);
 bool shsl_is_sym(const shsl_ref ref);
 bool shsl_is_str(const shsl_ref ref);
 bool shsl_is_int(const shsl_ref ref);
+bool shsl_is_bool(const shsl_ref ref);
+bool shsl_is_char(const shsl_ref ref);
+bool shsl_is_vptr(const shsl_ref ref);
 bool shsl_is_real(const shsl_ref ref);
 bool shsl_is_num(const shsl_ref ref);
 bool shsl_is_err(const shsl_ref ref);
@@ -1220,6 +1223,15 @@ bool shsl_is_str(const shsl_ref ref) {
 }
 bool shsl_is_int(const shsl_ref ref) {
     return shsl_type(ref) == SHSL_INT;
+}
+bool shsl_is_bool(const shsl_ref ref) {
+    return shsl_type(ref) == SHSL_BOOL;
+}
+bool shsl_is_char(const shsl_ref ref) {
+    return shsl_type(ref) == SHSL_CHAR;
+}
+bool shsl_is_vptr(const shsl_ref ref) {
+    return shsl_type(ref) == SHSL_VPTR;
 }
 bool shsl_is_real(const shsl_ref ref) {
     return shsl_type(ref) == SHSL_REAL;
