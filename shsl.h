@@ -202,6 +202,8 @@ shsl_defstruct(shsl_user_fn);
 shsl_defstruct(shsl_ref);
 
 extern shsl_obj SHSL_GLOBAL_NIL;
+extern shsl_obj SHSL_GLOBAL_TRUE;
+extern shsl_obj SHSL_GLOBAL_FALSE;
 shsl_ref shsl_ref_to_nil(void);
 
 /// REFERENCE OPERATIONS DECLARATIONS
@@ -464,6 +466,7 @@ typedef enum SHSL_TOKEN_TYPE {
     // literals
     SHSL_TOK_NIL = 0, SHSL_TOK_SYMBOL,
     SHSL_TOK_INTEGER, SHSL_TOK_REAL, SHSL_TOK_STRING,
+    SHSL_TOK_CHAR, SHSL_TOK_BOOL,
 
     // (quasi)quoting
     SHSL_TOK_QUOTE, SHSL_TOK_QUASIQUOTE, SHSL_TOK_COMMA,
@@ -487,7 +490,7 @@ shsl_defstruct(lexer_pair);
 // return a token of a given type with no extra information
 shsl_token empty_token(enum SHSL_TOKEN_TYPE token_type);
 // return an error message from a token_off call
-lexer_pair error_lexer_pair(const char* errmsg);
+lexer_pair error_lexer_pair(const char* errmsg, ...);
 
 // is this character special for the lexer?
 bool is_special_char(const char c);
@@ -1070,9 +1073,31 @@ typedef struct shsl_obj {
 } shsl_obj;	
 
 shsl_obj SHSL_GLOBAL_NIL = {0};
+shsl_obj SHSL_GLOBAL_TRUE = {
+    .ref_count = 0,
+    .type = SHSL_BOOL,
+    .b = true
+};
+shsl_obj SHSL_GLOBAL_FALSE = {
+    .ref_count = 0,
+    .type = SHSL_BOOL,
+    .b = false
+};
 shsl_ref shsl_ref_to_nil(void) {
     return (shsl_ref) {
         .ptr = &SHSL_GLOBAL_NIL,
+        .is_weak = true,
+    };
+}
+shsl_ref shsl_ref_to_true(void) {
+    return (shsl_ref) {
+        .ptr = &SHSL_GLOBAL_TRUE,
+        .is_weak = true,
+    };
+}
+shsl_ref shsl_ref_to_false(void) {
+    return (shsl_ref) {
+        .ptr = &SHSL_GLOBAL_FALSE,
         .is_weak = true,
     };
 }
@@ -1495,6 +1520,7 @@ void shsl_free(shsl_ref ref) {
 #endif
     switch(shsl_type(ref)) {
         case SHSL_NIL:
+        case SHSL_BOOL:
             // fprintf(stderr, "cannot free NIL! You fucked something up!\n");
             break;
 
@@ -2066,15 +2092,23 @@ shsl_token empty_token(SHSL_TOKEN_TYPE token_type) {
 }
 // since we return errors as special token pairs, might as well have an
 // ad hoc function for that
-lexer_pair error_lexer_pair(const char* errmsg) {
-    return (lexer_pair) {
+lexer_pair error_lexer_pair(const char* errmsg, ...) {
+    va_list vp;
+    va_start(vp, errmsg);
+    lexer_pair ret = (lexer_pair) {
 	.token = (shsl_token) {
 	    .type = SHSL_TOK_ERROR,
-	    .ref = shsl_mkerr(shsl_ref_to_nil(), "[SHSL LEXER] ERROR: %s", errmsg),
+	    .ref = shsl_vmkerr(shsl_ref_to_nil(), errmsg, vp),
 	},
 	.remaining = NULL,
     };
+    va_end(vp);
+    return ret;
 }
+#define ERROR_LEXER_PAIR(s)\
+    error_lexer_pair("[IN SHSL LEXER] "s);
+#define ERROR_LEXER_PAIR_FMT(s, ...)\
+    error_lexer_pair("[IN SHSL LEXER] "s, __VA_ARGS__);
 
 // special characters are chars that once encountered you go like
 // "ok, I'm done with the current thing, this character starts the next thing"
@@ -2139,10 +2173,23 @@ shsl_token parse_non_special_token(const char*c, size_t len) {
 	    .ref = shsl_mkint(l),
 	};
 
-    if (len == 3 && c[0] == 'n' && c[1] == 'i' && c[2] == 'l')
+    if (len == 3 &&
+        c[0] == 'n' && c[1] == 'i' && c[2] == 'l')
 	return (shsl_token) {
 	    .type = SHSL_TOK_NIL,
 	    .ref = shsl_ref_to_nil(),
+	};
+    if (len == 4 &&
+        c[0] == 't' && c[1] == 'r' && c[2] == 'u' && c[3] == 'e')
+	return (shsl_token) {
+	    .type = SHSL_TOK_BOOL,
+	    .ref = shsl_ref_to_true(),
+	};
+    if (len == 5 &&
+        c[0] == 'f' && c[1] == 'a' && c[2] == 'l' && c[3] == 's' && c[3] == 'e')
+	return (shsl_token) {
+	    .type = SHSL_TOK_BOOL,
+	    .ref = shsl_ref_to_false(),
 	};
 	
     shsl_token t =  (shsl_token) {
@@ -2157,7 +2204,7 @@ shsl_token parse_non_special_token(const char*c, size_t len) {
 lexer_pair token_off(const char* str) {
     // handle null pointer string
     if(!str)
-	return error_lexer_pair("cannot read null pointer to string!");
+	return ERROR_LEXER_PAIR("cannot read null pointer to string!");
 
     // skip whitespace
     while(isspace(*str)) str++;
@@ -2174,10 +2221,10 @@ lexer_pair token_off(const char* str) {
     // handle special chars
     switch(*str) {
 	// comments
-        case ';':
+        case ';': 
             // make sure to handle end of string as well as end of line
             while(*str != '\n' && *str != '\0') str++;
-            if(*str == '\n') str++;
+            if(*str == '\n') str++; // this also takes care of \r\n
             return token_off(str);
 
             // parentheses
@@ -2201,6 +2248,7 @@ lexer_pair token_off(const char* str) {
                                  .remaining = str+1, };
 
             // quotes and quasiquotes 
+            // (note, quasiquoting is still not implemented)
         case '\'':
             return (lexer_pair){ .token = empty_token(SHSL_TOK_QUOTE),
                                  .remaining = str+1, };
@@ -2211,7 +2259,67 @@ lexer_pair token_off(const char* str) {
             return (lexer_pair){ .token = empty_token(SHSL_TOK_COMMA),
                                  .remaining = str+1, };
 
+        case '\\': {
+            // character literal
+            const char* c = str+1;
+            while(isprint(*c) && !isspace(*c)) {
+                c++;
+                if(is_special_char(*c)) break;
+                // check will only start from str+2 so it doesn't break like
+                // \(, for instance
+                // it only checks if a special character should interrupt the current
+                // character token being parsed
+            }
+
+            // c is now past the end of the character literal
+            if(c == (str + 2))
+                // singe character case
+                return (lexer_pair) {
+                    .token = (shsl_token) {
+                        .type = SHSL_TOK_CHAR,
+                        .ref = shsl_mkchar(*(str+1)),
+                    },
+                    .remaining = c,
+                };
+
+            else {
+                // multiple character case
+                char ret = '\0';
+                if(c == (str + 1 + strlen("newline")) &&
+                   (strncmp(str + 1, "newline", strlen("newline")) == 0))
+                    ret = '\n';
+                else if(c == (str + 1 + strlen("space")) &&
+                   (strncmp(str + 1, "space", strlen("space")) == 0))
+                    ret = ' ';
+                else if(c == (str + 1 + strlen("tab")) &&
+                   (strncmp(str + 1, "tab", strlen("tab")) == 0))
+                    ret = '\t';
+                else if(c == (str + 1 + strlen("formfeed")) &&
+                   (strncmp(str + 1, "formfeed", strlen("formfeed")) == 0))
+                    ret = '\f';
+                else if(c == (str + 1 + strlen("backspace")) &&
+                   (strncmp(str + 1, "backspace", strlen("backspace")) == 0))
+                    ret = '\b';
+                else if(c == (str + 1 + strlen("return")) &&
+                   (strncmp(str + 1, "return", strlen("return")) == 0))
+                    ret = '\r';
+                else
+                    return ERROR_LEXER_PAIR_FMT
+                        ("invalid character literal : %.*s", (int)(c-str), str);
+
+                return (lexer_pair) {
+                    .token = (shsl_token) {
+                        .type = SHSL_TOK_CHAR,
+                        .ref = shsl_mkchar(ret),
+                    },
+                    .remaining = c,
+                };
+            }
+            // TODO: unicode
+        }
+
         case '"': {
+            // string literal 
             shsl_string_builder sb = {0};
             const char* iter = str+1;
             while(*iter != '\0' && *iter != '"') {
@@ -2219,15 +2327,14 @@ lexer_pair token_off(const char* str) {
                     char escape = *(iter+1);
                     if(escape == '\0') {
                         if(sb.size != 0) free(sb.buf);
-                        return error_lexer_pair
+                        return ERROR_LEXER_PAIR
                             ("why did try and use the null terminator "
                              "in an escape sequence? how do you even do that?");
                     }
                     if(!does_char_escape(escape)) {
                         if(sb.size != 0) free(sb.buf);
-                        return error_lexer_pair
-                            (shsl_append_chars("unrecognized escape sequence: \\",
-                                               escape, '!'));
+                        return ERROR_LEXER_PAIR_FMT
+                            ("unrecognized escape sequence: %c!", (int)(escape));
                     }
                     shsl_sb_push(&sb, escape_to_escaped(escape));
                     iter+=2;
@@ -2250,7 +2357,7 @@ lexer_pair token_off(const char* str) {
             else if(*iter=='\0') {
                 // unterminated string literal
                 if(sb.size != 0) free(sb.buf);
-                return error_lexer_pair("unterminated string literal!");
+                return ERROR_LEXER_PAIR("unterminated string literal!");
             }
             else {
                 // string closed correctly
@@ -2269,6 +2376,7 @@ lexer_pair token_off(const char* str) {
 
     // if we got here then it's not a special char
     // it's either a symbol or a number
+    // the logic for the symbol case also covers for nil, true, and false
     const char* c = str;
     while(is_symbol_char(*c)) c++;
 
@@ -2296,6 +2404,8 @@ parser_pair parse_off(const char* str) {
         case SHSL_TOK_INTEGER:
         case SHSL_TOK_REAL:
         case SHSL_TOK_STRING:
+        case SHSL_TOK_CHAR:
+        case SHSL_TOK_BOOL:
             return (parser_pair) {
                 .ref = lp.token.ref,
                 .remaining = lp.remaining,
@@ -2396,6 +2506,27 @@ parser_pair parse_until(const char* str,
     // otherwise we parse the next object on until we reach a stop token
     while(true) {
         lexer_pair lp = token_off(str);
+        if(lp.token.type == SHSL_TOK_ERROR) {
+            shsl_free(lp.token.ref);
+            fprintf(stderr,
+                    "error: encountered lexer error while parsing %s...%s block, "
+                    "aborting parser"SHSL_NL,
+                    stop == SHSL_TOK_CLOSE_PAREN ? "("
+                    : stop == SHSL_TOK_CLOSE_SQUARE ? "["
+                    : stop == SHSL_TOK_CLOSE_CURLY ? "{"
+                    : "wtf bro",
+
+                    stop == SHSL_TOK_CLOSE_PAREN ? ")"
+                    : stop == SHSL_TOK_CLOSE_SQUARE ? "]"
+                    : stop == SHSL_TOK_CLOSE_CURLY ? "}"
+                    : "wtf bro"
+                   );
+            shsl_free(shsl_cb_get(cb));
+            if(cb.type == SHSL_CB_MAP && !cb.map_builder.reading_key)
+                shsl_free(cb.map_builder.curr_key);
+            return (parser_pair){0};
+        }
+
         if(lp.token.type == stop) {
             if(!shsl_is_nil(lp.token.ref))
                 shsl_free(lp.token.ref);
@@ -2422,6 +2553,28 @@ parser_pair parse_until(const char* str,
 
         // append parsed object to acc list
         parser_pair pp = parse_off(str);
+        // TODO: I should probably find a better way to signal errors than just
+        // nulling random nullable shit for the hell of it
+        if(pp.remaining == NULL) {
+            fprintf(stderr,
+                    "error: encountered parser error while parsing %s...%s block, "
+                    "aborting parser"SHSL_NL,
+                    stop == SHSL_TOK_CLOSE_PAREN ? "("
+                    : stop == SHSL_TOK_CLOSE_SQUARE ? "["
+                    : stop == SHSL_TOK_CLOSE_CURLY ? "{"
+                    : "wtf bro",
+
+                    stop == SHSL_TOK_CLOSE_PAREN ? ")"
+                    : stop == SHSL_TOK_CLOSE_SQUARE ? "]"
+                    : stop == SHSL_TOK_CLOSE_CURLY ? "}"
+                    : "wtf bro"
+                   );
+            shsl_free(shsl_cb_get(cb));
+            if(cb.type == SHSL_CB_MAP && !cb.map_builder.reading_key)
+                shsl_free(cb.map_builder.curr_key);
+            return (parser_pair){0};
+        }
+
         shsl_cb_add(&cb, pp.ref);
         str = pp.remaining;
         if(!shsl_is_nil(lp.token.ref))
@@ -5497,59 +5650,6 @@ char* shsl_sb_get(shsl_string_builder* sb) {
 }
 
 /// PRINTING DEFINITIONS
-void shsl_dbg_fputtok(const shsl_token* tok, FILE* stream) {
-    fputs("token ", stream);
-    switch(tok->type) {
-        case SHSL_TOK_NIL:
-            fputs("SHSL_TOK_NIL: ", stream);
-            break;
-        case SHSL_TOK_INTEGER:
-            fputs("SHSL_TOK_INTEGER: ", stream);
-            break;
-        case SHSL_TOK_REAL:
-            fputs("SHSL_TOK_REAL: ", stream);
-            break;
-        case SHSL_TOK_STRING:
-            fputs("SHSL_TOK_STRING: ", stream);
-            break;
-        case SHSL_TOK_SYMBOL:
-            fputs("SHSL_TOK_SYMBOL: ", stream);
-            break;
-        case SHSL_TOK_QUOTE:
-            fputs("SHSL_TOK_QUOTE: ", stream);
-            break;
-        case SHSL_TOK_QUASIQUOTE:
-            fputs("SHSL_TOK_QUASIQUOTE: ", stream);
-            break;
-        case SHSL_TOK_COMMA:
-            fputs("SHSL_TOK_COMMA: ", stream);
-            break;
-        case SHSL_TOK_OPEN_PAREN:
-            fputs("SHSL_TOK_OPEN_PAREN: ", stream);
-            break;
-        case SHSL_TOK_CLOSE_PAREN:
-            fputs("SHSL_TOK_CLOSE_PAREN: ", stream);
-            break;
-        case SHSL_TOK_OPEN_SQUARE:
-            fputs("SHSL_TOK_OPEN_SQUARE: ", stream);
-            break;
-        case SHSL_TOK_CLOSE_SQUARE:
-            fputs("SHSL_TOK_CLOSE_SQUARE: ", stream);
-            break;
-        case SHSL_TOK_OPEN_CURLY:
-            fputs("SHSL_TOK_OPEN_CURLY: ", stream);
-            break;
-        case SHSL_TOK_CLOSE_CURLY:
-            fputs("SHSL_TOK_CLOSE_CURLY: ", stream);
-            break;
-        case SHSL_TOK_EOF:
-            fputs("SHSL_TOK_EOF: ", stream);
-            break;
-        case SHSL_TOK_ERROR:
-            fputs("SHSL_TOK_ERROR: ", stream);
-    };
-    shsl_fpr(tok->ref, stream);
-}
 void shsl_fpr(const shsl_ref ref, FILE* stream) {
     char* c = shsl_dump(ref);
     fputs(c, stream);
@@ -5576,6 +5676,11 @@ shsl_ref shsl_eval_str(const char* c, shsl_ref env) {
             if(p.ref.ptr)
                 shsl_free(p.ref);
             break;
+        }
+        if(shsl_is_err(p.ref)) {
+            shsl_log_err ("received error from parser, "
+                          "cannot proceed further in parsing string");
+            shsl_free(p.ref);
         }
 
         // TODO: make form_to_expr accept an environment so we can
