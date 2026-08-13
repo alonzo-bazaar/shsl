@@ -1,0 +1,67 @@
+#!../shsl
+;; -*- mode:clojure -*-
+;; vi: set ft=clojure:
+
+(def o [ " --- "
+         "/   \\"
+         "|   |"
+        "\\   /"
+         " --- "])
+
+(def n ["|\\   |"
+        "| \\  |"
+        "|  \\ |"
+        "|   \\|"
+        "|    |"])
+
+(def e ["+----"
+        "|    "
+        "+--  "
+        "|    "
+        "+----"])
+
+(def space ["  "
+            "  "
+            "  "
+            "  "
+            "  "])
+
+(def f ["+----"
+        "|    "
+        "+--  "
+        "|    "
+        "|    "])
+
+(def u [ "|    |"
+         "|    |"
+         "|    |"
+        "\\   /"
+         " --- "])
+
+(def s [" ---\\ "
+        "/    "
+        "+---+"
+        "    /"
+        "\\--- "])
+
+(defn iota [n]
+  (let [acc [] i 0]
+    (while (< i n)
+      (vec-push! acc i)
+      (set! i (+ i 1)))
+    acc))
+
+(let* [letters [o n e space o f space u s]
+
+       detached-rows
+       (map
+         (fn [i] (map (fn [letter] (nth letter i)) letters))
+         (iota 5))
+
+       attached-rows
+       (map (fn [v] (join-with " " v)) detached-rows)]
+  (map
+    (fn [i] (map println attached-rows) (println))
+    (iota 5))
+  nil)
+

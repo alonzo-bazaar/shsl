@@ -5539,7 +5539,7 @@ shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
          "        (t (err \"can't get length of datum, not well defined\" a))))",
          env);
 
-    // logging and shit lengths
+    // logging and shit
     shsl_eval_str
         ("(defmacro with-log-level [body-ll & body]"
          "  (let [old-ll-sym (gensym \"old-log-level\")"
@@ -5551,6 +5551,90 @@ shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
          "            (list 'set-log-level! old-ll-sym)"
          "            body-res-sym))))",
          env);
+
+    // how the fuck have I gone this far into a fucking lisp without adding
+    // map and reduce functions? lol
+    shsl_eval_str
+        ("(defn map-list [f s]"
+         "  (when s (cons (f (car s)) (map-list f (cdr s)))))"
+         "(defn map-vec [f s]"
+         "  (let [acc []]"
+         "    (s-foreach [elt s]"
+         "               (vec-push! acc (f elt)))"
+         "    acc))"
+         "(defn map [f s]"
+         "  (cond ((list? s) (map-list f s))"
+         "        ((vec? s) (map-vec f s))"
+         "        ((str? s) (join-with "" (map-vec f s)))"
+         "        (t (err \"map: nuh uh\" {:function f :collection s}))))",
+         env);
+
+    shsl_eval_str
+        ("(defn reduce-list [f l]"
+         "  (when l"
+         "    (let [a (car l)"
+         "          i (cdr l)]"
+         "      (while i"
+         "        (set a (f a (car i)))"
+         "        (set i (cdr i)))"
+         "      a)))"
+         "(defn reduce-vec [f v]"
+         "  (when (> (len v) 0)"
+         "    (let [a (get v 0)"
+         "          i 1"
+         "          l (len v)]"
+         "      (while (< i l)"
+         "        (set a (f a (get v i)))"
+         "        (set i (+ i 1)))"
+         "      a)))"
+         "(defn reduce [f s]"
+         "  (cond ((list? s) (reduce-lst f s))"
+         "        ((or (vec? s) (str? s)) (reduce-vec f s))"
+         "        (t (err \"reduce: nuh uh\") {:function f :collection s})))",
+         env);
+
+    // also find-if, find-if is quite useful
+    shsl_eval_str
+        ("(defn find-if-list [l f]"
+         "  (let [i l]"
+         "    (while (and i (not (f (car i))))"
+         "      (set i (cdr i)))"
+         "    (car i)))"
+         "(defn find-if-vec [v f]"
+         "  (when (> (len v) 0)"
+         "    (let [i 0"
+         "          l (len v)]"
+         "      (while (and (> l i) (not (f (get v i))))"
+         "        (set i (+ i 1)))"
+         "      (and (> l i) (get v i)))))"
+         "(defn find-if [s f]"
+         "  (cond ((list? s) (find-if-list s f))"
+         "        ((or (vec? s) (str? s)) (find-if-vec s f))"
+         "        (t (err \"find-if: nuh uh\" {:collection s :function f}))))",
+         env);
+
+    shsl_eval_str
+        ("(defn complement [f]"
+         "  (fn [a] (not (f a))))"
+         "(defn find-if-not [s f]"
+         "  (find-if s (complement f)))",
+         env);
+
+    shsl_eval_str
+        (";; TODO: this but for lists as well\n"
+         "(defn starts-with [sq pref]"
+         "  (when (>= (len sq) (len pref))"
+         "    (let [l (len pref)"
+         "          m 0"
+         "          i 0]"
+         "      (while (and (< i l) (= (get sq i) (get pref i)))"
+         "        (set i (+ i 1))"
+         "        (set m (+ m 1)))"
+         "      (= m l))))",
+         env);
+
+    // I use this way too fucking much not to put it in here already
+    shsl_eval_str("(defn arg? [a] (find argv a))", env);
     
     return env;
 }
@@ -5885,6 +5969,7 @@ int shsl_main(shsl_ref env, const char* program_name, int argc, char** argv) {
     // process argv:
     // no args given? then default behaviour is to just start a repl
     if(argc == 0) {
+        shsl_env_def(env, shsl_mksym("argv"), shsl_mkvec(-3));
         shsl_repl(env);
         return 0;
     }

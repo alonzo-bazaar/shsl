@@ -159,7 +159,8 @@ typedef enum SHSL_OBJ_TYPE {
     // atoms
     // nil first so an object initialized as {0} is nil
     SHSL_NIL = 0, SHSL_SYM, 
-    SHSL_INT, SHSL_REAL, SHSL_STR,
+    SHSL_CHAR, SHSL_BOOL, SHSL_INT, SHSL_REAL, SHSL_STR,
+    SHSL_VPTR,
 
     // collections
     SHSL_CONS, SHSL_VEC, SHSL_MAP,
@@ -177,6 +178,7 @@ shsl_defstruct(shsl_obj);
 // possible shsl objects
 // (outside of primitive types for which we just use the C ones)
 shsl_defstruct(shsl_sym);
+shsl_defstruct(shsl_str);
 shsl_defstruct(shsl_err);
 shsl_defstruct(shsl_cons);
 shsl_defstruct(shsl_vec);
@@ -204,6 +206,8 @@ shsl_defstruct(shsl_user_fn);
 shsl_defstruct(shsl_ref);
 
 extern shsl_obj SHSL_GLOBAL_NIL;
+extern shsl_obj SHSL_GLOBAL_TRUE;
+extern shsl_obj SHSL_GLOBAL_FALSE;
 shsl_ref shsl_ref_to_nil(void);
 
 /// REFERENCE OPERATIONS DECLARATIONS
@@ -244,6 +248,9 @@ bool shsl_is_nil(const shsl_ref ref);
 bool shsl_is_sym(const shsl_ref ref);
 bool shsl_is_str(const shsl_ref ref);
 bool shsl_is_int(const shsl_ref ref);
+bool shsl_is_bool(const shsl_ref ref);
+bool shsl_is_char(const shsl_ref ref);
+bool shsl_is_vptr(const shsl_ref ref);
 bool shsl_is_real(const shsl_ref ref);
 bool shsl_is_num(const shsl_ref ref);
 bool shsl_is_err(const shsl_ref ref);
@@ -267,7 +274,10 @@ bool shsl_is_macro(const shsl_ref ref);
 // on the heap makes it easier to automatically manage
 shsl_ref shsl_mkint(long l);
 shsl_ref shsl_mkreal(double d);
+shsl_ref shsl_mkchar(const char c);
 shsl_ref shsl_mkstr(const char* str);
+shsl_ref shsl_mkbool(const bool b);
+shsl_ref shsl_mkvptr(const void* vptr);
 shsl_ref shsl_mksym(const char* name);
 shsl_ref shsl_mkerr(shsl_ref data, const char* msg, ...);
 // shsl_vmkerr is like shsl_mkerr but accepts a "pre opened" va_list and it
@@ -430,6 +440,7 @@ ssize_t shsl_list_length(shsl_ref list_ref);
 /// CONVENIENCE GETTERS DECLARATIONS
 long shsl_int(shsl_ref ref);
 double shsl_real(shsl_ref ref);
+const char* shsl_get_str(shsl_ref sym_ref);
 const char* shsl_sym_name(shsl_ref sym_ref);
 bool shsl_sym_is_kword(shsl_ref sym);
 
@@ -463,6 +474,7 @@ typedef enum SHSL_TOKEN_TYPE {
     // literals
     SHSL_TOK_NIL = 0, SHSL_TOK_SYMBOL,
     SHSL_TOK_INTEGER, SHSL_TOK_REAL, SHSL_TOK_STRING,
+    SHSL_TOK_CHAR, SHSL_TOK_BOOL,
 
     // (quasi)quoting
     SHSL_TOK_QUOTE, SHSL_TOK_QUASIQUOTE, SHSL_TOK_COMMA,
@@ -486,7 +498,7 @@ shsl_defstruct(lexer_pair);
 // return a token of a given type with no extra information
 shsl_token empty_token(enum SHSL_TOKEN_TYPE token_type);
 // return an error message from a token_off call
-lexer_pair error_lexer_pair(const char* errmsg);
+lexer_pair error_lexer_pair(const char* errmsg, ...);
 
 // is this character special for the lexer?
 bool is_special_char(const char c);
@@ -991,6 +1003,11 @@ typedef struct shsl_ref {
     bool is_weak;
 } shsl_ref;
 
+typedef struct shsl_str {
+    char* buf;
+    const size_t size;
+} shsl_str;
+
 typedef struct shsl_sym {
     const shsl_ref name; // must be string
 } shsl_sym ;
@@ -1048,7 +1065,10 @@ typedef struct shsl_obj {
     union {
 	const long i;
 	const double r;
-	char* str;
+        const char c;
+        const bool b;
+        const void* vptr;
+	const shsl_str str;
 
 	const shsl_sym sym;
 	shsl_cons cons;
@@ -1066,9 +1086,31 @@ typedef struct shsl_obj {
 } shsl_obj;	
 
 shsl_obj SHSL_GLOBAL_NIL = {0};
+shsl_obj SHSL_GLOBAL_TRUE = {
+    .ref_count = 0,
+    .type = SHSL_BOOL,
+    .b = true
+};
+shsl_obj SHSL_GLOBAL_FALSE = {
+    .ref_count = 0,
+    .type = SHSL_BOOL,
+    .b = false
+};
 shsl_ref shsl_ref_to_nil(void) {
     return (shsl_ref) {
         .ptr = &SHSL_GLOBAL_NIL,
+        .is_weak = true,
+    };
+}
+shsl_ref shsl_ref_to_true(void) {
+    return (shsl_ref) {
+        .ptr = &SHSL_GLOBAL_TRUE,
+        .is_weak = true,
+    };
+}
+shsl_ref shsl_ref_to_false(void) {
+    return (shsl_ref) {
+        .ptr = &SHSL_GLOBAL_FALSE,
         .is_weak = true,
     };
 }
@@ -1185,6 +1227,15 @@ bool shsl_is_str(const shsl_ref ref) {
 bool shsl_is_int(const shsl_ref ref) {
     return shsl_type(ref) == SHSL_INT;
 }
+bool shsl_is_bool(const shsl_ref ref) {
+    return shsl_type(ref) == SHSL_BOOL;
+}
+bool shsl_is_char(const shsl_ref ref) {
+    return shsl_type(ref) == SHSL_CHAR;
+}
+bool shsl_is_vptr(const shsl_ref ref) {
+    return shsl_type(ref) == SHSL_VPTR;
+}
 bool shsl_is_real(const shsl_ref ref) {
     return shsl_type(ref) == SHSL_REAL;
 }
@@ -1195,7 +1246,9 @@ bool shsl_is_err(const shsl_ref ref) {
     return shsl_type(ref) == SHSL_ERR;
 }
 bool shsl_is_falsey(const shsl_ref ref) {
-    return (shsl_is_nil(ref) || shsl_is_err(ref));
+    return (shsl_is_nil(ref)
+            || shsl_is_err(ref)
+            || (shsl_is_bool(ref) && !ref.ptr->b));
 }
 bool shsl_is_truthy(const shsl_ref ref) {
     return !shsl_is_falsey(ref);
@@ -1269,6 +1322,15 @@ bool shsl_is_macro(const shsl_ref ref) {
 shsl_ref shsl_mkint(long l) {
     return_mallocd_obj(.ref_count = 0, .type = SHSL_INT, .i = l);
 }
+shsl_ref shsl_mkchar(const char c) {
+    return_mallocd_obj(.ref_count = 0, .type = SHSL_CHAR, .c = c);
+}
+shsl_ref shsl_mkbool(const bool b) {
+    return_mallocd_obj(.ref_count = 0, .type = SHSL_BOOL, .b = b);
+}
+shsl_ref shsl_mkvptr(const void* vptr) {
+    return_mallocd_obj(.ref_count = 0, .type = SHSL_VPTR, .vptr = vptr);
+}
 shsl_ref shsl_mkreal(double d) {
     return_mallocd_obj(.ref_count = 0, .type = SHSL_REAL, .r = d);
 }
@@ -1281,7 +1343,11 @@ shsl_ref shsl_mkstr_nocopy(char* str) {
     if(!str)
         str = slice_to_fresh_str("", 0);
 
-    return_mallocd_obj(.ref_count = 0, .type = SHSL_STR, .str = str);
+    size_t ssz = strlen(str);
+
+    return_mallocd_obj(.ref_count = 0,
+                       .type = SHSL_STR,
+                       .str = (shsl_str){.buf = str, .size = ssz});
 }
 shsl_ref shsl_mksym_nocopy(char* name) {
     return_mallocd_obj(.ref_count = 0,
@@ -1316,7 +1382,7 @@ shsl_ref shsl_vmkerr(shsl_ref data, const char* msg, va_list args) {
     int n = vsprintf(buf, msg, args);
 
     if(n >= 0 && shsl_should_log(SHSL_LOG_LEVEL_ERROR)) {
-        shsl_log_err("%*s", n, buf);
+        shsl_log_err("%.*s", n, buf);
         shsl_log_err("with data:"); shsl_fpr(data, stderr); fputs(SHSL_NL, stderr);
     }
 
@@ -1433,13 +1499,16 @@ shsl_ref shsl_mkuser_macro(shsl_ref env, shsl_lambda_list* lambda_list,
 shsl_ref shsl_copy(shsl_ref ref) {
     switch(shsl_type(ref)) {
         case SHSL_NIL:    return shsl_ref_to_nil();
-        case SHSL_SYM:    return shsl_mksym(ref.ptr->sym.name.ptr->str);
+        case SHSL_SYM:    return shsl_mksym(ref.ptr->sym.name.ptr->str.buf);
+        case SHSL_CHAR:   return shsl_mkchar(ref.ptr->c);
+        case SHSL_BOOL:   return shsl_mkbool(ref.ptr->b);
+        case SHSL_VPTR:   return shsl_mkvptr(ref.ptr->vptr);
         case SHSL_INT:    return shsl_mkint(ref.ptr->i);
         case SHSL_REAL:   return shsl_mkint(ref.ptr->r);
-        case SHSL_STR:    return shsl_mkstr(ref.ptr->str);
+        case SHSL_STR:    return shsl_mkstr(ref.ptr->str.buf);
 
         case SHSL_ERR:    return shsl_mkerr(shsl_copy(ref.ptr->err.data),
-                                            ref.ptr->err.msg.ptr->str);
+                                            ref.ptr->err.msg.ptr->str.buf);
 
         case SHSL_CONS:   return shsl_mkcons(shsl_copy(ref.ptr->cons.car),
                                              shsl_copy(ref.ptr->cons.cdr));
@@ -1479,11 +1548,12 @@ void shsl_free(shsl_ref ref) {
 #endif
     switch(shsl_type(ref)) {
         case SHSL_NIL:
+        case SHSL_BOOL:
             // fprintf(stderr, "cannot free NIL! You fucked something up!\n");
             break;
 
         case SHSL_STR:
-            free(ref.ptr->str);
+            free(ref.ptr->str.buf);
             free(ref.ptr);
             break;
 
@@ -1572,17 +1642,23 @@ bool shsl_eq(shsl_ref lhs_ref, shsl_ref rhs_ref) {
         case SHSL_NIL:
             return true;
         case SHSL_SYM:
-            return strcmp(lhs->sym.name.ptr->str, rhs->sym.name.ptr->str) == 0;
+            return shsl_eq(lhs->sym.name, rhs->sym.name);
         case SHSL_ERR:
-            return strcmp(lhs->err.msg.ptr->str, rhs->err.msg.ptr->str) == 0
+            return shsl_eq(lhs->err.msg,  rhs->err.msg)
                 && shsl_eq(lhs->err.data, lhs->err.data);
 
         case SHSL_INT:
             return lhs->i == rhs->i;
+        case SHSL_CHAR:
+            return lhs->c == rhs->c;
+        case SHSL_BOOL:
+            return lhs->b == rhs->b;
+        case SHSL_VPTR:
+            return lhs->vptr == rhs->vptr;
         case SHSL_REAL:
             return lhs->r == rhs->r;
         case SHSL_STR:
-            return strcmp(lhs->str, rhs->str) == 0;
+            return strcmp(lhs->str.buf, rhs->str.buf) == 0;
 
         case SHSL_CONS:
             return shsl_eq(lhs->cons.car, rhs->cons.car)
@@ -1618,6 +1694,9 @@ const char* shsl_stringify_type(SHSL_OBJ_TYPE type) {
     switch(type) {
         case SHSL_NIL:           return "shsl nil";
         case SHSL_SYM:           return "shsl symbol";
+        case SHSL_CHAR:          return "shsl character";
+        case SHSL_BOOL:          return "shsl boolean";
+        case SHSL_VPTR:          return "shsl void pointer";
         case SHSL_INT:           return "shsl integer";
         case SHSL_REAL:          return "shsl real";
         case SHSL_STR:           return "shsl string";
@@ -1928,8 +2007,17 @@ double shsl_real(shsl_ref ref) {
     assert(shsl_is_int(ref) || shsl_is_real(ref));
     return shsl_is_int(ref)?(double)ref.ptr->i:ref.ptr->r;
 }
+const char* shsl_get_str(shsl_ref ref) {
+    assert(shsl_is_str(ref));
+    const char* buf = ref.ptr->str.buf;
+    const size_t sz = ref.ptr->str.size;
+    assert (buf[sz] == '\0'); // TODO: may wanna allow for arbitrary string views
+                              // and shit, but like, later
+    return buf;
+}
 const char* shsl_sym_name(shsl_ref sym_ref) {
-    return sym_ref.ptr->sym.name.ptr->str;
+    assert(shsl_is_sym(sym_ref));
+    return shsl_get_str(sym_ref.ptr->sym.name);
 }
 bool shsl_sym_is_kword(shsl_ref sym) {
     assert(shsl_is_sym(sym));
@@ -1999,27 +2087,6 @@ shsl_ref shsl_fn_env(shsl_ref ref) {
             assert(0 && "unreachable");
     }
 }
-/*
-void shsl_fn_env_mark_weak(shsl_ref ref) {
-    assert(shsl_is_fn(ref));
-    switch(ref.ptr->type) {
-        case SHSL_BUILTIN_FN:
-            shsl_ref_mark_weak(&(ref.ptr->builtin_fn.env));
-            break;
-        case SHSL_USER_FN:
-            shsl_ref_mark_weak(&(ref.ptr->user_fn.env));
-            break;
-        case SHSL_BUILTIN_MACRO:
-            shsl_ref_mark_weak(&(ref.ptr->builtin_macro.env));
-            break;
-        case SHSL_USER_MACRO:
-            shsl_ref_mark_weak(&(ref.ptr->user_macro.env));
-            break;
-        default:
-            assert(0 && "unreachable");
-    }
-}
-*/
 
 shsl_def_errtype_fn(int, int)
 shsl_def_errtype_fn(size_t, size_t)
@@ -2062,15 +2129,23 @@ shsl_token empty_token(SHSL_TOKEN_TYPE token_type) {
 }
 // since we return errors as special token pairs, might as well have an
 // ad hoc function for that
-lexer_pair error_lexer_pair(const char* errmsg) {
-    return (lexer_pair) {
+lexer_pair error_lexer_pair(const char* errmsg, ...) {
+    va_list vp;
+    va_start(vp, errmsg);
+    lexer_pair ret = (lexer_pair) {
 	.token = (shsl_token) {
 	    .type = SHSL_TOK_ERROR,
-	    .ref = shsl_mkerr(shsl_ref_to_nil(), "[SHSL LEXER] ERROR: %s", errmsg),
+	    .ref = shsl_vmkerr(shsl_ref_to_nil(), errmsg, vp),
 	},
 	.remaining = NULL,
     };
+    va_end(vp);
+    return ret;
 }
+#define ERROR_LEXER_PAIR(s)\
+    error_lexer_pair("[IN SHSL LEXER] "s);
+#define ERROR_LEXER_PAIR_FMT(s, ...)\
+    error_lexer_pair("[IN SHSL LEXER] "s, __VA_ARGS__);
 
 // special characters are chars that once encountered you go like
 // "ok, I'm done with the current thing, this character starts the next thing"
@@ -2135,10 +2210,23 @@ shsl_token parse_non_special_token(const char*c, size_t len) {
 	    .ref = shsl_mkint(l),
 	};
 
-    if (len == 3 && c[0] == 'n' && c[1] == 'i' && c[2] == 'l')
+    if (len == 3 &&
+        c[0] == 'n' && c[1] == 'i' && c[2] == 'l')
 	return (shsl_token) {
 	    .type = SHSL_TOK_NIL,
 	    .ref = shsl_ref_to_nil(),
+	};
+    if (len == 4 &&
+        c[0] == 't' && c[1] == 'r' && c[2] == 'u' && c[3] == 'e')
+	return (shsl_token) {
+	    .type = SHSL_TOK_BOOL,
+	    .ref = shsl_ref_to_true(),
+	};
+    if (len == 5 &&
+        c[0] == 'f' && c[1] == 'a' && c[2] == 'l' && c[3] == 's' && c[4] == 'e')
+	return (shsl_token) {
+	    .type = SHSL_TOK_BOOL,
+	    .ref = shsl_ref_to_false(),
 	};
 	
     shsl_token t =  (shsl_token) {
@@ -2153,7 +2241,7 @@ shsl_token parse_non_special_token(const char*c, size_t len) {
 lexer_pair token_off(const char* str) {
     // handle null pointer string
     if(!str)
-	return error_lexer_pair("cannot read null pointer to string!");
+	return ERROR_LEXER_PAIR("cannot read null pointer to string!");
 
     // skip whitespace
     while(isspace(*str)) str++;
@@ -2170,10 +2258,10 @@ lexer_pair token_off(const char* str) {
     // handle special chars
     switch(*str) {
 	// comments
-        case ';':
+        case ';': 
             // make sure to handle end of string as well as end of line
             while(*str != '\n' && *str != '\0') str++;
-            if(*str == '\n') str++;
+            if(*str == '\n') str++; // this also takes care of \r\n
             return token_off(str);
 
             // parentheses
@@ -2197,6 +2285,7 @@ lexer_pair token_off(const char* str) {
                                  .remaining = str+1, };
 
             // quotes and quasiquotes 
+            // (note, quasiquoting is still not implemented)
         case '\'':
             return (lexer_pair){ .token = empty_token(SHSL_TOK_QUOTE),
                                  .remaining = str+1, };
@@ -2207,7 +2296,67 @@ lexer_pair token_off(const char* str) {
             return (lexer_pair){ .token = empty_token(SHSL_TOK_COMMA),
                                  .remaining = str+1, };
 
+        case '\\': {
+            // character literal
+            const char* c = str+1;
+            while(isprint(*c) && !isspace(*c)) {
+                c++;
+                if(is_special_char(*c)) break;
+                // check will only start from str+2 so it doesn't break like
+                // \(, for instance
+                // it only checks if a special character should interrupt the current
+                // character token being parsed
+            }
+
+            // c is now past the end of the character literal
+            if(c == (str + 2))
+                // singe character case
+                return (lexer_pair) {
+                    .token = (shsl_token) {
+                        .type = SHSL_TOK_CHAR,
+                        .ref = shsl_mkchar(*(str+1)),
+                    },
+                    .remaining = c,
+                };
+
+            else {
+                // multiple character case
+                char ret = '\0';
+                if(c == (str + 1 + strlen("newline")) &&
+                   (strncmp(str + 1, "newline", strlen("newline")) == 0))
+                    ret = '\n';
+                else if(c == (str + 1 + strlen("space")) &&
+                   (strncmp(str + 1, "space", strlen("space")) == 0))
+                    ret = ' ';
+                else if(c == (str + 1 + strlen("tab")) &&
+                   (strncmp(str + 1, "tab", strlen("tab")) == 0))
+                    ret = '\t';
+                else if(c == (str + 1 + strlen("formfeed")) &&
+                   (strncmp(str + 1, "formfeed", strlen("formfeed")) == 0))
+                    ret = '\f';
+                else if(c == (str + 1 + strlen("backspace")) &&
+                   (strncmp(str + 1, "backspace", strlen("backspace")) == 0))
+                    ret = '\b';
+                else if(c == (str + 1 + strlen("return")) &&
+                   (strncmp(str + 1, "return", strlen("return")) == 0))
+                    ret = '\r';
+                else
+                    return ERROR_LEXER_PAIR_FMT
+                        ("invalid character literal : %.*s", (int)(c-str), str);
+
+                return (lexer_pair) {
+                    .token = (shsl_token) {
+                        .type = SHSL_TOK_CHAR,
+                        .ref = shsl_mkchar(ret),
+                    },
+                    .remaining = c,
+                };
+            }
+            // TODO: unicode
+        }
+
         case '"': {
+            // string literal 
             shsl_string_builder sb = {0};
             const char* iter = str+1;
             while(*iter != '\0' && *iter != '"') {
@@ -2215,15 +2364,14 @@ lexer_pair token_off(const char* str) {
                     char escape = *(iter+1);
                     if(escape == '\0') {
                         if(sb.size != 0) free(sb.buf);
-                        return error_lexer_pair
+                        return ERROR_LEXER_PAIR
                             ("why did try and use the null terminator "
                              "in an escape sequence? how do you even do that?");
                     }
                     if(!does_char_escape(escape)) {
                         if(sb.size != 0) free(sb.buf);
-                        return error_lexer_pair
-                            (shsl_append_chars("unrecognized escape sequence: \\",
-                                               escape, '!'));
+                        return ERROR_LEXER_PAIR_FMT
+                            ("unrecognized escape sequence: %c!", (int)(escape));
                     }
                     shsl_sb_push(&sb, escape_to_escaped(escape));
                     iter+=2;
@@ -2246,7 +2394,7 @@ lexer_pair token_off(const char* str) {
             else if(*iter=='\0') {
                 // unterminated string literal
                 if(sb.size != 0) free(sb.buf);
-                return error_lexer_pair("unterminated string literal!");
+                return ERROR_LEXER_PAIR("unterminated string literal!");
             }
             else {
                 // string closed correctly
@@ -2265,6 +2413,7 @@ lexer_pair token_off(const char* str) {
 
     // if we got here then it's not a special char
     // it's either a symbol or a number
+    // the logic for the symbol case also covers for nil, true, and false
     const char* c = str;
     while(is_symbol_char(*c)) c++;
 
@@ -2292,6 +2441,8 @@ parser_pair parse_off(const char* str) {
         case SHSL_TOK_INTEGER:
         case SHSL_TOK_REAL:
         case SHSL_TOK_STRING:
+        case SHSL_TOK_CHAR:
+        case SHSL_TOK_BOOL:
             return (parser_pair) {
                 .ref = lp.token.ref,
                 .remaining = lp.remaining,
@@ -2392,6 +2543,27 @@ parser_pair parse_until(const char* str,
     // otherwise we parse the next object on until we reach a stop token
     while(true) {
         lexer_pair lp = token_off(str);
+        if(lp.token.type == SHSL_TOK_ERROR) {
+            shsl_free(lp.token.ref);
+            fprintf(stderr,
+                    "error: encountered lexer error while parsing %s...%s block, "
+                    "aborting parser"SHSL_NL,
+                    stop == SHSL_TOK_CLOSE_PAREN ? "("
+                    : stop == SHSL_TOK_CLOSE_SQUARE ? "["
+                    : stop == SHSL_TOK_CLOSE_CURLY ? "{"
+                    : "wtf bro",
+
+                    stop == SHSL_TOK_CLOSE_PAREN ? ")"
+                    : stop == SHSL_TOK_CLOSE_SQUARE ? "]"
+                    : stop == SHSL_TOK_CLOSE_CURLY ? "}"
+                    : "wtf bro"
+                   );
+            shsl_free(shsl_cb_get(cb));
+            if(cb.type == SHSL_CB_MAP && !cb.map_builder.reading_key)
+                shsl_free(cb.map_builder.curr_key);
+            return (parser_pair){0};
+        }
+
         if(lp.token.type == stop) {
             if(!shsl_is_nil(lp.token.ref))
                 shsl_free(lp.token.ref);
@@ -2418,6 +2590,28 @@ parser_pair parse_until(const char* str,
 
         // append parsed object to acc list
         parser_pair pp = parse_off(str);
+        // TODO: I should probably find a better way to signal errors than just
+        // nulling random nullable shit for the hell of it
+        if(pp.remaining == NULL) {
+            fprintf(stderr,
+                    "error: encountered parser error while parsing %s...%s block, "
+                    "aborting parser"SHSL_NL,
+                    stop == SHSL_TOK_CLOSE_PAREN ? "("
+                    : stop == SHSL_TOK_CLOSE_SQUARE ? "["
+                    : stop == SHSL_TOK_CLOSE_CURLY ? "{"
+                    : "wtf bro",
+
+                    stop == SHSL_TOK_CLOSE_PAREN ? ")"
+                    : stop == SHSL_TOK_CLOSE_SQUARE ? "]"
+                    : stop == SHSL_TOK_CLOSE_CURLY ? "}"
+                    : "wtf bro"
+                   );
+            shsl_free(shsl_cb_get(cb));
+            if(cb.type == SHSL_CB_MAP && !cb.map_builder.reading_key)
+                shsl_free(cb.map_builder.curr_key);
+            return (parser_pair){0};
+        }
+
         shsl_cb_add(&cb, pp.ref);
         str = pp.remaining;
         if(!shsl_is_nil(lp.token.ref))
@@ -2621,6 +2815,9 @@ shsl_expr* shsl_form_to_expr(shsl_ref form, shsl_ref env) {
         case SHSL_REAL:
         case SHSL_STR:
         case SHSL_NIL:
+        case SHSL_CHAR:
+        case SHSL_BOOL:
+        case SHSL_VPTR:
             return_mallocd_expr(.type = SHSL_EXPR_LITERAL,
                                 .literal = shsl_ref_add(form));
 
@@ -2950,10 +3147,10 @@ shsl_expr* shsl_form_to_expr(shsl_ref form, shsl_ref env) {
                              });
                 }
                 // same reasoning as above
-                else if((strcmp(s, "set") == 0) || (strcmp(s, "def") == 0)) {
-                    bool are_we_set = (strcmp(s, "set") == 0);
+                else if((strcmp(s, "set!") == 0) || (strcmp(s, "def") == 0)) {
+                    bool are_we_set = (strcmp(s, "set!") == 0);
                     // TODO
-                    // we currently only support (set/def <name> <val>)
+                    // we currently only support (set!/def <name> <val>)
                     // I'd like set to be destructuring
                     if(form_length != 3)
                         return shsl_expr_error
@@ -4165,7 +4362,7 @@ shsl_defun(shsl_builtin_div, "/", args, env, {
         return shsl_mkreal(a/b);
     })
 
-#define shsl_bool_to_obj(...) ((__VA_ARGS__)?shsl_mksym("t"):shsl_ref_to_nil())
+#define shsl_bool_to_obj(...) ((__VA_ARGS__)?shsl_ref_to_true():shsl_ref_to_false())
 shsl_defun(shsl_builtin_gt, ">", args, env, {
         (void)env;
         shsl_fn_assert_argslen(== 2);
@@ -4297,13 +4494,13 @@ shsl_defun(shsl_builtin_err, "err", args, env, {
         // I wanted to support formatted errors so it made more sense
         // to have the (format) string at the end with the formatted shit
         if(shsl_fn_argslen() == 2)
-            return shsl_mkerr(shsl_fn_arg(1), shsl_fn_arg(0).ptr->str);
+            return shsl_mkerr(shsl_fn_arg(1), shsl_fn_arg(0).ptr->str.buf);
 
         shsl_cb rest_builder = shsl_cb_make(SHSL_CB_LIST);
         for(size_t i = 1; i<shsl_fn_argslen(); ++i)
             shsl_cb_add(&rest_builder, shsl_fn_arg(i));
 
-        return shsl_mkerr(shsl_cb_get(rest_builder), shsl_fn_arg(0).ptr->str);
+        return shsl_mkerr(shsl_cb_get(rest_builder), shsl_fn_arg(0).ptr->str.buf);
     })
 
 // some more common-lisp-y data functions (I just kinda miss car and cdr)
@@ -4375,6 +4572,32 @@ shsl_defun(shsl_builtin_str, "str", args, env, {
 
 // (substr "string" start) = substring from that point to the end of the string
 // (substr "string" start end) = substring from a to b (b excluded, of course)
+shsl_defun(shsl_builtin_strget, "str-get", args, env, {
+        (void)env;
+        shsl_fn_assert_argslen(== 2);
+        shsl_fn_assert_argtype(0, SHSL_STR);
+        shsl_fn_assert_argtype(1, SHSL_INT);
+        ssize_t si = shsl_int(shsl_fn_arg(1));
+        if(si < 0)
+            return shsl_mkerr
+                (shsl_kwmap_fromelts(":index", shsl_fn_arg(1),
+                                     ":indexed-string", shsl_fn_arg(0)),
+                 "str-get: cannot index into string using negative index");
+
+        size_t i = si;
+        if (i >= shsl_fn_arg(0).ptr->str.size)
+            return shsl_mkerr
+                (shsl_kwmap_fromelts(":index",
+                                     shsl_fn_arg(1),
+                                     ":indexed-string",
+                                     shsl_fn_arg(0),
+                                     ":string-length",
+                                     shsl_mkint(shsl_fn_arg(0).ptr->str.size)),
+                 "str-get: index out of bounds for string length");
+
+        return shsl_mkchar(shsl_fn_arg(0).ptr->str.buf[i]);
+    })
+
 shsl_defun(shsl_builtin_substr, "str-sub", args, env, {
         (void)env;
         shsl_fn_assert_argslen(>= 2);
@@ -4384,7 +4607,7 @@ shsl_defun(shsl_builtin_substr, "str-sub", args, env, {
         if(shsl_fn_argslen() == 3)
             shsl_fn_assert_argtype(2, SHSL_INT);
 
-        const char* in_buf = shsl_fn_arg(0).ptr->str;
+        const char* in_buf = shsl_fn_arg(0).ptr->str.buf;
         const size_t sl = strlen(in_buf);
         const ssize_t start_s = shsl_int(shsl_fn_arg(1));
         const ssize_t end_s = shsl_fn_argslen()==3
@@ -4435,7 +4658,7 @@ shsl_defun(shsl_builtin_strcat, "str-cat", args, env, {
 
         shsl_string_builder sb = {0};
         shsl_vec_foreach(i, arg, args)
-            shsl_sb_push_nullt_str(&sb, arg.ptr->str);
+            shsl_sb_push_sized_str(&sb, arg.ptr->str.buf, arg.ptr->str.size);
 
         shsl_sb_push(&sb, '\0');
         return shsl_mkstr_nocopy(shsl_sb_get(&sb)); 
@@ -4452,7 +4675,7 @@ shsl_defun(shsl_builtin_strlen, "str-len", args, env, {
         (void)env;
         shsl_fn_assert_argslen(== 1);
         shsl_fn_assert_argtype(0, SHSL_STR);
-        return shsl_mkint(strlen(shsl_fn_arg(0).ptr->str));
+        return shsl_mkint(shsl_fn_arg(0).ptr->str.size);
     })
 
 /// BUILTIN VECTOR FUNCTIONS DEFINITIONS
@@ -4636,13 +4859,13 @@ shsl_defun(shsl_builtin_contains, "contains?", args, env, {
     })
 shsl_defun(shsl_builtin_count, "count", args, env, {
         (void)env;
-        shsl_fn_assert_argslen(== 2);
+        shsl_fn_assert_argslen(== 1);
         shsl_ref col = shsl_fn_arg(0);
         switch(shsl_type(col)) {
             case SHSL_NIL:
                 return shsl_mkint(0);
             case SHSL_STR:
-                return shsl_mkint(strlen(col.ptr->str));
+                return shsl_mkint(col.ptr->str.size);
             case SHSL_VEC:
                 return shsl_mkint(shsl_vec_length(col));
             case SHSL_MAP:
@@ -4740,7 +4963,7 @@ shsl_defun(shsl_builtin_exit, "exit", args, env, {
 shsl_defun(shsl_builtin_load, "load", args, env, {
         shsl_fn_assert_argslen(==1);
         shsl_fn_assert_argtype(0, SHSL_STR);
-        const char* filepath = shsl_fn_arg(0).ptr->str;
+        const char* filepath = shsl_fn_arg(0).ptr->str.buf;
 
         return shsl_eval_file(filepath, env);
     })
@@ -4759,7 +4982,7 @@ shsl_defun(shsl_builtin_gensym, "gensym", args, env, {
                      "the first argument to be of type string");
             // shsl_cat_strs heap allocates, remember this fact
             // for when we get to the teardown of this functions
-            base = shsl_cat_strs("gensym-", gsname.ptr->str, "-");
+            base = shsl_cat_strs("gensym-", gsname.ptr->str.buf, "-");
         }
         else
             return shsl_mkerr
@@ -4814,7 +5037,7 @@ shsl_defun(shsl_builtin_log, "log", args, env, {
         shsl_fn_assert_argtype(0, SHSL_INT);
         shsl_fn_assert_argtype(1, SHSL_STR);
         int log_level = shsl_int(shsl_fn_arg(0));
-        const char* what = shsl_fn_arg(1).ptr->str;
+        const char* what = shsl_fn_arg(1).ptr->str.buf;
         
         FILE* s = log_level==SHSL_LOG_LEVEL_INFO?stdout:stderr;
         shsl_log(s, log_level, what);
@@ -4945,6 +5168,8 @@ shsl_ref shsl_env_add_initial_definitions(shsl_ref env) {
     // string operations(?)
     shsl_env_def(env, shsl_mksym("str"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_str));
+    shsl_env_def(env, shsl_mksym("str-get"),
+                 shsl_mkbuiltin_fn(env, shsl_builtin_strget));
     shsl_env_def(env, shsl_mksym("str-sub"),
                  shsl_mkbuiltin_fn(env, shsl_builtin_substr));
     shsl_env_def(env, shsl_mksym("str-cat"),
@@ -5099,7 +5324,7 @@ shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
          "  (list 'not expr))"
 
          "(defn set-code [a b]"
-         "  (list 'set a b))"
+         "  (list 'set! a b))"
 
          "(defn def-code [a b]"
          "  (list 'def a b))"
@@ -5180,9 +5405,7 @@ shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
     // here we define a bunch of lil useful functions
     // indexing into from collections
     shsl_eval_str
-        ("(defn str-get [s i] (str-sub s i (+ i 1)))"
-
-         "(defn get [a b]"
+        ("(defn get [a b]"
          "  (cond ((str?  a) (str-get a b))"
          "        ((vec?  a) (vec-get a b))"
          "        ((map?  a) (map-get a b))"
@@ -5195,14 +5418,14 @@ shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
          "  (let [i 0"
          "        l (str-len haystack)]"
          "    (while (and (!= i l) (!= (str-get haystack i) needle))"
-         "      (set i (+ i 1)))"
+         "      (set! i (+ i 1)))"
          "    (if (!= i l) i nil)))"
                   
          "(defn vec-find [haystack needle]"
          "  (let [i 0"
          "        l (vec-len haystack)]"
          "    (while (and (!= i l) (!= (vec-get haystack i) needle))"
-         "      (set i (+ i 1)))"
+         "      (set! i (+ i 1)))"
          "    (if (!= i l) i nil)))"
 
          "(defn find [haystack needle]"
@@ -5217,7 +5440,7 @@ shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
          "  (let [i start-ind"
          "        l (len s)]"
          "    (while (and (< i l) (not (test (get s i) target)))"
-         "      (set i (+ i 1)))"
+         "      (set! i (+ i 1)))"
          "    (and (< i l) i)))",
          env);
 
@@ -5263,7 +5486,7 @@ shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
          "         slice (next-slice-from 0)]"
          "    (while (and (:start slice) (:end slice))"
          "      (vec-push! acc (sub s (:start slice) (:end slice)))"
-         "      (set slice (next-slice-from (:end slice))))"
+         "      (set! slice (next-slice-from (:end slice))))"
          "    acc))"
 
          "(defn join-with [sep ss]"
@@ -5292,7 +5515,7 @@ shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
          "    (let [acc [] i a]"
          "      (while (< i b)"
          "        (vec-push! acc (get v i))"
-         "        (set i (+ i 1)))"
+         "        (set! i (+ i 1)))"
          "      acc)))"
 
          "(defn sub [s a b]"
@@ -5307,8 +5530,8 @@ shsl_ref shsl_env_eval_stdlib(shsl_ref env) {
         ("(defn lst-len [a]"
          "  (let [l 0]"
          "    (while (cons? a)"
-         "      (set a (cdr a))"
-         "      (set l (+ 1 l)))"
+         "      (set! a (cdr a))"
+         "      (set! l (+ 1 l)))"
          "    l))"
 
          "(defn len [a]"
@@ -5364,27 +5587,42 @@ void shsl_sb_push_obj(shsl_string_builder* sb, shsl_ref obj, bool pretty) {
             written = sprintf(buf, "%f", obj.ptr->r);
             shsl_sb_push_sized_str(sb, buf, written);
             break;
+        case SHSL_CHAR:
+            written = sprintf(buf, "\\%c", (int)obj.ptr->c);
+            shsl_sb_push_sized_str(sb, buf, written);
+            break;
+        case SHSL_BOOL:
+            shsl_sb_push_nullt_str(sb, obj.ptr->b?"true":"false");
+            break;
+        case SHSL_VPTR:
+            written = sprintf(buf, "VOID_PTR_%p", obj.ptr->vptr);
+            shsl_sb_push_sized_str(sb, buf, written);
+            break;
         case SHSL_STR:
             if(!pretty) {
                 // dump to be read by reader
                 // handle all escapes and display them as printable ascii
+                const char* c = obj.ptr->str.buf;
+                const size_t s = obj.ptr->str.size;
                 shsl_sb_push(sb, '"');
-                for(const char* c = obj.ptr->str; *c; c++) {
-                    if(is_escape_char(*c))
-                        shsl_sb_push_nullt_str(sb, to_string_representation(*c));
+                for(size_t i = 0; i<s; ++i) {
+                    if(is_escape_char(c[i]))
+                        shsl_sb_push_nullt_str(sb, to_string_representation(c[i]));
                     else
-                        shsl_sb_push(sb, *c);
+                        shsl_sb_push(sb, c[i]);
                 }
                 shsl_sb_push(sb, '"');
             }
             else {
                 // I'm a pretty princess
                 // and displaying escape sequences is not pretty
-                shsl_sb_push_nullt_str(sb, obj.ptr->str);
+                shsl_sb_push_sized_str(sb, obj.ptr->str.buf, obj.ptr->str.size);
             }
             break;
         case SHSL_SYM:
-            shsl_sb_push_nullt_str(sb, obj.ptr->sym.name.ptr->str);
+            shsl_sb_push_sized_str(sb,
+                                   obj.ptr->sym.name.ptr->str.buf,
+                                   obj.ptr->sym.name.ptr->str.size);
             break;
         case SHSL_NIL:
             shsl_sb_push_nullt_str(sb, "nil");
@@ -5479,59 +5717,6 @@ char* shsl_sb_get(shsl_string_builder* sb) {
 }
 
 /// PRINTING DEFINITIONS
-void shsl_dbg_fputtok(const shsl_token* tok, FILE* stream) {
-    fputs("token ", stream);
-    switch(tok->type) {
-        case SHSL_TOK_NIL:
-            fputs("SHSL_TOK_NIL: ", stream);
-            break;
-        case SHSL_TOK_INTEGER:
-            fputs("SHSL_TOK_INTEGER: ", stream);
-            break;
-        case SHSL_TOK_REAL:
-            fputs("SHSL_TOK_REAL: ", stream);
-            break;
-        case SHSL_TOK_STRING:
-            fputs("SHSL_TOK_STRING: ", stream);
-            break;
-        case SHSL_TOK_SYMBOL:
-            fputs("SHSL_TOK_SYMBOL: ", stream);
-            break;
-        case SHSL_TOK_QUOTE:
-            fputs("SHSL_TOK_QUOTE: ", stream);
-            break;
-        case SHSL_TOK_QUASIQUOTE:
-            fputs("SHSL_TOK_QUASIQUOTE: ", stream);
-            break;
-        case SHSL_TOK_COMMA:
-            fputs("SHSL_TOK_COMMA: ", stream);
-            break;
-        case SHSL_TOK_OPEN_PAREN:
-            fputs("SHSL_TOK_OPEN_PAREN: ", stream);
-            break;
-        case SHSL_TOK_CLOSE_PAREN:
-            fputs("SHSL_TOK_CLOSE_PAREN: ", stream);
-            break;
-        case SHSL_TOK_OPEN_SQUARE:
-            fputs("SHSL_TOK_OPEN_SQUARE: ", stream);
-            break;
-        case SHSL_TOK_CLOSE_SQUARE:
-            fputs("SHSL_TOK_CLOSE_SQUARE: ", stream);
-            break;
-        case SHSL_TOK_OPEN_CURLY:
-            fputs("SHSL_TOK_OPEN_CURLY: ", stream);
-            break;
-        case SHSL_TOK_CLOSE_CURLY:
-            fputs("SHSL_TOK_CLOSE_CURLY: ", stream);
-            break;
-        case SHSL_TOK_EOF:
-            fputs("SHSL_TOK_EOF: ", stream);
-            break;
-        case SHSL_TOK_ERROR:
-            fputs("SHSL_TOK_ERROR: ", stream);
-    };
-    shsl_fpr(tok->ref, stream);
-}
 void shsl_fpr(const shsl_ref ref, FILE* stream) {
     char* c = shsl_dump(ref);
     fputs(c, stream);
@@ -5558,6 +5743,11 @@ shsl_ref shsl_eval_str(const char* c, shsl_ref env) {
             if(p.ref.ptr)
                 shsl_free(p.ref);
             break;
+        }
+        if(shsl_is_err(p.ref)) {
+            shsl_log_err ("received error from parser, "
+                          "cannot proceed further in parsing string");
+            shsl_free(p.ref);
         }
 
         // TODO: make form_to_expr accept an environment so we can
@@ -6196,6 +6386,46 @@ char* shsl_cmd_to_win32_str(int argc, char** argv, bool cmd_exe) {
     return shsl_sb_get(&sb);
 }
 
+#ifdef SHSL_WIN32_WARN_ON_NO_EXTENSION
+void maybe_warn_no_extension(const char* exename) {
+    shsl_log_warn
+        ("running executable without specifying file extension!");
+    shsl_log_warn
+        ("cannot determine wether to treat executable as batch file!");
+    shsl_log_warn
+        ("this operation can be dangerous, please make sure you're");
+    shsl_log_warn
+        ("not passing any unsanitized user input to this function.");
+    shsl_log_warn("okthxbye <3"SHSL_NL);
+}
+#else
+#define maybe_warn_no_extension()
+#endif // SHSL_WIN32_WARN_ON_NO_EXTENSION
+
+void shsl_log_win32_error(DWORD error, const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    shsl_vlog(stderr, SHSL_LOG_LEVEL_ERROR, fmt, args);
+    va_end(args);
+
+    // think of error as errno
+    // and of the following code as puts(strerror(errno))
+    // just... more microsofty
+
+    // https://stackoverflow.com/questions/1387064/how-to-get-the-error-message-from-the-error-code-returned-by-getlasterror
+    // https://learn.microsoft.com/en-us/windows/win32/api/errhandlingapi/nf-errhandlingapi-getlasterror#syntax
+    // https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-formatmessage#syntax
+    char buf[1024] = {0};
+    FormatMessageA
+        (FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+         NULL,
+         error,
+         MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+         buf, 1024,
+         NULL);
+    shsl_log_err("%s"SHSL_NL, buf);
+}
+
 // https://learn.microsoft.com/en-us/windows/win32/procthread/creating-processes
 int shsl_exec(int argc, char** argv) {
     if(argc == 0) {
@@ -6208,16 +6438,10 @@ int shsl_exec(int argc, char** argv) {
        shsl_string_ends_with(argv[0], ".bat"))
         should_escape_cmd_exe = true;
 
-#ifdef SHSL_WIN32_WARN_ON_NO_EXTENSION
     if(strpbrk(argv[0], ".") == NULL) {
-        shsl_log_warn("running executable without specifying file extension!");
-        shsl_log_warn("cannot determine wether to treat executable as batch file!");
-        shsl_log_warn("this operation can be dangerous, please make sure you're");
-        shsl_log_warn("not passing any unsanitized user input to this function.");
-        shsl_log_warn("okthxbye <3"SHSL_NL);
         should_escape_cmd_exe = false;
+        maybe_warn_no_extension();
     }
-#endif
 
     STARTUPINFO si;
     PROCESS_INFORMATION pi;
@@ -6225,47 +6449,37 @@ int shsl_exec(int argc, char** argv) {
     si.cb = sizeof(si);
     ZeroMemory(&pi, sizeof(pi));
 
-    char* cmd_str = shsl_cmd_to_win32_str(argc, argv, should_escape_cmd_exe);
+    char* cmd_str = shsl_cmd_to_win32_str(argc, argv,
+                                          should_escape_cmd_exe);
 
-    // the win32 api is so beautiful
-    if(CreateProcessA
-       (NULL,                             // no module name
-        cmd_str,                          // command line string
-        NULL, NULL, FALSE, 0, NULL, NULL, // buncha shit 'n flags
-        &si, &pi                          // output params
-       ) == 0) {
-        // if we get here we encountered an error while creating process
-        // to get the message releated to the error (think strerror(errno))
-        // 
-        // https://stackoverflow.com/questions/1387064/how-to-get-the-error-message-from-the-error-code-returned-by-getlasterror
-        // https://learn.microsoft.com/en-us/windows/win32/api/errhandlingapi/nf-errhandlingapi-getlasterror#syntax
-        // https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-formatmessage#syntax
-        DWORD last_error = GetLastError();
-        char buf[1024] = {0};
-        FormatMessageA
-            (FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-             NULL,
-             last_error,
-             MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-             buf, 1024,
-             NULL);
-        
-        fprintf(stderr, "%s", buf);
+    BOOL created_successfully = CreateProcessA
+        (NULL,                             // no module name
+         cmd_str,                          // command line string
+         NULL, NULL, FALSE, 0, NULL, NULL, // buncha shit 'n flags
+         &si, &pi);                        // output params
+
+    if(!created_successfully) {
+        shsl_log_win32_error
+            (GetLastError(),
+             "an error occured while creating child process!"SHSL_NL);
         return -1;
     }
 
-    // if we're not in the if then it's all fine and dandy, process creation succeded
+    // if we're not in the if then it's all fine and dandy
+    // process creation succeded, process exists and is doing its thing
     // wait for process to exit
     WaitForSingleObject(pi.hProcess, INFINITE);
 
     // LPDWORD is just a pointer to DWORD
     // DWORD is just uint32_t
     // https://learn.microsoft.com/en-us/windows/win32/winprog/windows-data-types
-
+    // which means when calling GetExitCodeProcess...
     // https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getexitcodeprocess
     DWORD exit_code;
     if(!GetExitCodeProcess(pi.hProcess, &exit_code)) {
-        fprintf(stderr, "failed to obtain return value of process!"SHSL_NL);
+        shsl_log_win32_error
+            (GetLastError(),
+             "failed to obtain return value of process!"SHSL_NL);
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread); 
         return -1;
@@ -6281,11 +6495,174 @@ int shsl_exec(int argc, char** argv) {
 }
 
 int shsl_exec_into_strs(int argc, char** argv, char** outp, char** errp) {
-    (void)argc;
-    (void)argv;
-    (void)outp;
-    (void)errp;
-    assert(0 && "TODO");
+    // business as usual
+    if(argc == 0) {
+        shsl_log_err("cannot execute empty command!"SHSL_NL);
+        return -1;
+    }
+
+    bool should_escape_cmd_exe = false;
+    if(shsl_string_ends_with(argv[0], ".cmd") ||
+       shsl_string_ends_with(argv[0], ".bat"))
+        should_escape_cmd_exe = true;
+
+    if(strpbrk(argv[0], ".") == NULL) {
+        should_escape_cmd_exe = false;
+        maybe_warn_no_extension();
+    }
+
+    char* cmd_str = shsl_cmd_to_win32_str(argc, argv,
+                                          should_escape_cmd_exe);
+
+    // now for the redirect part:
+    // win32 api doesn't have fork exec
+    // which means you can't fork, set shit up, then exec
+    // which means you have to create the process and have all the shit already
+    // set up
+    // 
+    // in the code you gotta write, this translates to having to prepopulate
+    // a whole bunch of metadata structs and shit and already knowing 
+    // everything the starting child process must know before you call
+    // CreateProcess
+    // 
+    // you can't do the setup in the child process like in fork exec, you have
+    // to do all the setup in the parent process
+
+    // to pass pipes to child we must have the child inherit the stream handles
+    // when creating a pipe, the inheritance of the stream handles that pipe
+    // connects are controlled by a SECURITY_ATTRIBUTES you pass to CreatePipe
+    // so let's create a SECURITY_ATTRIBUTES that tells CreatePipe to make
+    // the pipe handles inheritable by child processes
+    SECURITY_ATTRIBUTES sec_attrs = {};
+    sec_attrs.nLength = sizeof(SECURITY_ATTRIBUTES);
+    sec_attrs.bInheritHandle = TRUE;
+    sec_attrs.lpSecurityDescriptor = NULL;
+    
+    // and create the handles to pipe the child's stdout (and stderr) to 
+    // handles that we control
+    HANDLE child_stdout_write = NULL; // child output goes here
+    HANDLE child_stdout_read = NULL;  // and we'll read it from here
+
+    HANDLE child_stderr_write = NULL; // child error goes here
+    HANDLE child_stderr_read = NULL;  // and we'll read it from here
+
+    if(!CreatePipe(&child_stdout_read, &child_stdout_write, &sec_attrs, 0)) {
+        shsl_log_win32_error
+            (GetLastError(),
+            "failed to create pipe to child process standard output");
+        return -1;
+    }
+    if(!SetHandleInformation(child_stdout_read, HANDLE_FLAG_INHERIT, 0)) {
+        shsl_log_win32_error
+            (GetLastError(),
+            "failed to set handle information for child process standard output");
+        return -1;
+    }
+    if(!CreatePipe(&child_stderr_read, &child_stderr_write, &sec_attrs, 0)) {
+        shsl_log_win32_error
+            (GetLastError(),
+            "failed to create pipe to child process standard error");
+        return -1;
+    }
+
+    if(!SetHandleInformation(child_stderr_read, HANDLE_FLAG_INHERIT, 0)) {
+        shsl_log_win32_error
+            (GetLastError(),
+            "failed to set handle information for child process standard error");
+        return -1;
+    }
+
+    // now that we created the stream handles we have to write somewhere that the
+    // child process should use these stream handles as its stdout and stderr 
+    // we do this in a STARTUPINFO that we're gonna pass to CreateProcess
+    // create a STARTUPINFO that tells the child to use the stdout and stderr we control
+    STARTUPINFO startup_info;
+    ZeroMemory(&startup_info, sizeof(STARTUPINFO)); // hygene first
+    startup_info.cb = sizeof(STARTUPINFO);
+    startup_info.hStdOutput = child_stdout_write;
+    startup_info.hStdError  = child_stderr_write;
+    startup_info.dwFlags |= STARTF_USESTDHANDLES;
+
+    // CreateProcess also takes a PROCESS_INFORMATION which it uses as an out parameter
+    // since C doesn't have multiple returns you give it a pointer to a 
+    // PROCESS_INFORMATION and CreateProcess will populate it with a bunch of info
+    // about the child process which the parent may need to wait on it, disown it, or 
+    // whatever it is parents do
+    PROCESS_INFORMATION process_info;
+    ZeroMemory(&process_info, sizeof(PROCESS_INFORMATION));
+
+    BOOL success = CreateProcessA
+        (NULL,           // always NULL, a module or something
+         cmd_str,        // child command line
+         NULL,           // security attributes for child process
+         NULL,           // security attributes for child process primary thread
+         TRUE,           // flag for controlling wether handles are inherited
+         0,              // flags for process creation
+         NULL,           // child environment variables (if NULL use parent's)
+         NULL,           // child initial working directory (if NULL use parent's)
+         &startup_info,  // child process startup info
+         &process_info); // struct to populate with info about the child process
+    if(!success) {
+        shsl_log_win32_error
+            (GetLastError(),
+            "failed to create child process");
+        return -1;
+    }
+
+    // we don't need the child stdout and stderr handles, and keeping them open could
+    // lead to a lot of problems 'cause processes reading from them can't tell when
+    // are they done if the child closes them but we keep them open
+    // so we should not keep them open
+    CloseHandle(child_stderr_write);
+    CloseHandle(child_stdout_write);
+
+    // collect child output
+    DWORD n_read = 0;
+    const size_t BUFSIZE = 4096;
+    char buf[BUFSIZE]; ZeroMemory(buf, sizeof(buf));
+
+    shsl_string_builder out_sb = {0};
+    shsl_string_builder err_sb = {0};
+
+    // collect standard out
+    while(true) {
+        BOOL read_success = ReadFile(child_stdout_read, buf,
+                                     BUFSIZE, &n_read, NULL);
+        if(!read_success) {
+            shsl_log_win32_error
+                (GetLastError(),
+                 "failed read from process stdout");
+            if(out_sb.buf) free(out_sb.buf);
+            return -1;
+        }
+        if(n_read == 0)
+            break;
+        shsl_sb_push_sized_str(&out_sb, buf, n_read);
+    }
+
+    // collect standard err
+    while(true) {
+        BOOL read_success = ReadFile(child_stderr_read, buf,
+                                     BUFSIZE, &n_read, NULL);
+        if(!read_success) {
+            shsl_log_win32_error
+                (GetLastError(),
+                 "failed read from process stderr");
+            if(out_sb.buf) free(out_sb.buf);
+            if(err_sb.buf) free(err_sb.buf);
+            return -1;
+        }
+        if(n_read == 0)
+            break;
+        shsl_sb_push_sized_str(&err_sb, buf, n_read);
+    }
+
+    shsl_sb_push(&out_sb, '\0');
+    shsl_sb_push(&err_sb, '\0');
+    *outp = shsl_sb_get(&out_sb);
+    *errp = shsl_sb_get(&err_sb);
+
+    return 0;
 }
 #endif // defined(SHSL_UNIX)
 
@@ -6314,7 +6691,7 @@ void shsl_strvec_to_argc_argv(shsl_ref strvec, int* argc_ptr, char*** argv_ptr) 
     argc = shsl_vec_length(strvec);
     argv = SHSL_ARR_ALLOC(char*, argc+1);
     shsl_vec_foreach(i, elt, strvec)
-        argv[i] = elt.ptr->str;
+        argv[i] = elt.ptr->str.buf;
     argv[argc] = NULL;
 
     *argc_ptr = argc;
